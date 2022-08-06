@@ -36,44 +36,38 @@
          (depending on the lengths of the packets).
 */
 
-'use strict';
+import { inspect } from "util";
 
-const { inspect } = require('util');
-
-const { bindingAvailable, NullCipher, NullDecipher } = require('./crypto.js');
-const {
+import { bindingAvailable, NullCipher, NullDecipher } from "./crypto";
+import {
   COMPAT_CHECKS,
   DISCONNECT_REASON,
   MESSAGE,
   SIGNALS,
   TERMINAL_MODE,
-} = require('./constants.js');
-const {
-  DEFAULT_KEXINIT,
-  KexInit,
-  kexinit,
-  onKEXPayload,
-} = require('./kex.js');
-const {
-  parseKey,
-} = require('./keyParser.js');
-const MESSAGE_HANDLERS = require('./handlers.js');
-const {
+} from "./constants";
+
+import { DEFAULT_KEXINIT, KexInit, kexinit, onKEXPayload } from "./kex";
+
+import { parseKey } from "./keyParser";
+import MESSAGE_HANDLERS from "./handlers";
+
+import {
   bufferCopy,
   bufferFill,
   bufferSlice,
   convertSignature,
   sendPacket,
   writeUInt32BE,
-} = require('./utils.js');
-const {
+} from "./utils";
+
+import {
   PacketReader,
   PacketWriter,
   ZlibPacketReader,
   ZlibPacketWriter,
-} = require('./zlib.js');
-
-const MODULE_VER = require('../../package.json').version;
+} from "./zlib";
+import { version as MODULE_VER } from "../../package.json";
 
 const VALID_DISCONNECT_REASONS = new Map(
   Object.values(DISCONNECT_REASON).map((n) => [n, 1])
@@ -85,13 +79,35 @@ const MAX_LINES = 1024;
 const PING_PAYLOAD = Buffer.from([
   MESSAGE.GLOBAL_REQUEST,
   // "keepalive@openssh.com"
-  0, 0, 0, 21,
-    107, 101, 101, 112, 97, 108, 105, 118, 101, 64, 111, 112, 101, 110, 115,
-    115, 104, 46, 99, 111, 109,
+  0,
+  0,
+  0,
+  21,
+  107,
+  101,
+  101,
+  112,
+  97,
+  108,
+  105,
+  118,
+  101,
+  64,
+  111,
+  112,
+  101,
+  110,
+  115,
+  115,
+  104,
+  46,
+  99,
+  111,
+  109,
   // Request a reply
   1,
 ]);
-const NO_TERMINAL_MODES_BUFFER = Buffer.from([ TERMINAL_MODE.TTY_OP_END ]);
+const NO_TERMINAL_MODES_BUFFER = Buffer.from([TERMINAL_MODE.TTY_OP_END]);
 
 function noop() {}
 
@@ -109,47 +125,86 @@ function noop() {}
     * session ID (set to exchange hash from initial handshake)
 */
 class Protocol {
+  _authenticated: any;
+  _authsQueue: any;
+  _banner: any;
+  _buffer: any;
+  _cipher: any;
+  _compatFlags: any;
+  _debug: any;
+  _decipher: any;
+  _handlers: any;
+  _hostKeys: any;
+  _hostVerifier: any;
+  _identRaw: any;
+  _kex: any;
+  _kexinit: any;
+  _offer: any;
+  _onError: any;
+  _onHandshakeComplete: any;
+  _onHeader: any;
+  _onPacket: any;
+  _onPayload: any;
+  _onWrite: any;
+  _packetRW: any;
+  _parse: any;
+  _queue: any;
+  _remoteIdentRaw: any;
+  _server: any;
+  _skipNextInboundPacket: any;
+  start: any;
   constructor(config) {
     const onWrite = config.onWrite;
-    if (typeof onWrite !== 'function')
-      throw new Error('Missing onWrite function');
-    this._onWrite = (data) => { onWrite(data); };
+    if (typeof onWrite !== "function")
+      throw new Error("Missing onWrite function");
+    this._onWrite = (data) => {
+      onWrite(data);
+    };
 
     const onError = config.onError;
-    if (typeof onError !== 'function')
-      throw new Error('Missing onError function');
-    this._onError = (err) => { onError(err); };
+    if (typeof onError !== "function")
+      throw new Error("Missing onError function");
+    this._onError = (err) => {
+      onError(err);
+    };
 
     const debug = config.debug;
-    this._debug = (typeof debug === 'function'
-                   ? (msg) => { debug(msg); }
-                   : undefined);
+    this._debug =
+      typeof debug === "function"
+        ? (msg) => {
+            debug(msg);
+          }
+        : undefined;
 
     const onHeader = config.onHeader;
-    this._onHeader = (typeof onHeader === 'function'
-                      ? (...args) => { onHeader(...args); }
-                      : noop);
+    this._onHeader =
+      typeof onHeader === "function"
+        ? (...args) => {
+            onHeader(...args);
+          }
+        : noop;
 
     const onPacket = config.onPacket;
-    this._onPacket = (typeof onPacket === 'function'
-                      ? () => { onPacket(); }
-                      : noop);
+    this._onPacket =
+      typeof onPacket === "function"
+        ? () => {
+            onPacket();
+          }
+        : noop;
 
     let onHandshakeComplete = config.onHandshakeComplete;
-    if (typeof onHandshakeComplete !== 'function')
-      onHandshakeComplete = noop;
+    if (typeof onHandshakeComplete !== "function") onHandshakeComplete = noop;
     this._onHandshakeComplete = (...args) => {
-      this._debug && this._debug('Handshake completed');
+      this._debug && this._debug("Handshake completed");
 
       // Process packets queued during a rekey where necessary
       const oldQueue = this._queue;
       if (oldQueue) {
         this._queue = undefined;
-        this._debug && this._debug(
-          `Draining outbound queue (${oldQueue.length}) ...`
-        );
-        for (let i = 0; i < oldQueue.length; ++i) {
-          const data = oldQueue[i];
+        this._debug &&
+          this._debug(`Draining outbound queue (${oldQueue.length}) ...`);
+
+        oldQueue.forEach((data) => {
           // data === payload only
 
           // XXX: hacky
@@ -161,8 +216,9 @@ class Protocol {
           }
 
           sendPacket(this, finalized);
-        }
-        this._debug && this._debug('... finished draining outbound queue');
+        });
+
+        this._debug && this._debug("... finished draining outbound queue");
       }
 
       onHandshakeComplete(...args);
@@ -170,10 +226,9 @@ class Protocol {
     this._queue = undefined;
 
     const messageHandlers = config.messageHandlers;
-    if (typeof messageHandlers === 'object' && messageHandlers !== null)
+    if (typeof messageHandlers === "object" && messageHandlers !== null)
       this._handlers = messageHandlers;
-    else
-      this._handlers = {};
+    else this._handlers = {};
 
     this._onPayload = onPayload.bind(this);
 
@@ -181,34 +236,34 @@ class Protocol {
     this._banner = undefined;
     let greeting;
     if (this._server) {
-      if (typeof config.hostKeys !== 'object' || config.hostKeys === null)
-        throw new Error('Missing server host key(s)');
+      if (typeof config.hostKeys !== "object" || config.hostKeys === null)
+        throw new Error("Missing server host key(s)");
       this._hostKeys = config.hostKeys;
 
       // Greeting displayed before the ssh identification string is sent, this
       // is usually ignored by most clients
-      if (typeof config.greeting === 'string' && config.greeting.length) {
-        greeting = (config.greeting.slice(-2) === '\r\n'
-                    ? config.greeting
-                    : `${config.greeting}\r\n`);
+      if (typeof config.greeting === "string" && config.greeting.length) {
+        greeting =
+          config.greeting.slice(-2) === "\r\n"
+            ? config.greeting
+            : `${config.greeting}\r\n`;
       }
 
       // Banner shown after the handshake completes, but before user
       // authentication begins
-      if (typeof config.banner === 'string' && config.banner.length) {
-        this._banner = (config.banner.slice(-2) === '\r\n'
-                        ? config.banner
-                        : `${config.banner}\r\n`);
+      if (typeof config.banner === "string" && config.banner.length) {
+        this._banner =
+          config.banner.slice(-2) === "\r\n"
+            ? config.banner
+            : `${config.banner}\r\n`;
       }
     } else {
       this._hostKeys = undefined;
     }
 
     let offer = config.offer;
-    if (typeof offer !== 'object' || offer === null)
-      offer = DEFAULT_KEXINIT;
-    else if (offer.constructor !== KexInit)
-      offer = new KexInit(offer);
+    if (typeof offer !== "object" || offer === null) offer = DEFAULT_KEXINIT;
+    else if (offer.constructor !== KexInit) offer = new KexInit(offer);
     this._kex = undefined;
     this._kexinit = undefined;
     this._offer = offer;
@@ -219,10 +274,10 @@ class Protocol {
       read: new PacketReader(),
       write: new PacketWriter(this),
     };
-    this._hostVerifier = (!this._server
-                           && typeof config.hostVerifier === 'function'
-                          ? config.hostVerifier
-                          : undefined);
+    this._hostVerifier =
+      !this._server && typeof config.hostVerifier === "function"
+        ? config.hostVerifier
+        : undefined;
 
     this._parse = parseHeader;
     this._buffer = undefined;
@@ -230,7 +285,7 @@ class Protocol {
     this._authenticated = false;
     this._remoteIdentRaw = undefined;
     let sentIdent;
-    if (typeof config.ident === 'string') {
+    if (typeof config.ident === "string") {
       this._identRaw = Buffer.from(`SSH-2.0-${config.ident}`);
 
       sentIdent = Buffer.allocUnsafe(this._identRaw.length + 2);
@@ -239,7 +294,7 @@ class Protocol {
       sentIdent[sentIdent.length - 1] = 10; // '\n'
     } else if (Buffer.isBuffer(config.ident)) {
       const fullIdent = Buffer.allocUnsafe(8 + config.ident.length);
-      fullIdent.latin1Write('SSH-2.0-', 0, 8);
+      (fullIdent as any).latin1Write("SSH-2.0-", 0, 8);
       fullIdent.set(config.ident, 8);
       this._identRaw = fullIdent;
 
@@ -254,19 +309,15 @@ class Protocol {
     this._compatFlags = 0;
 
     if (this._debug) {
-      if (bindingAvailable)
-        this._debug('Custom crypto binding available');
-      else
-        this._debug('Custom crypto binding not available');
+      if (bindingAvailable) this._debug("Custom crypto binding available");
+      else this._debug("Custom crypto binding not available");
     }
 
-    this._debug && this._debug(
-      `Local ident: ${inspect(this._identRaw.toString())}`
-    );
+    this._debug &&
+      this._debug(`Local ident: ${inspect(this._identRaw.toString())}`);
     this.start = () => {
       this.start = undefined;
-      if (greeting)
-        this._onWrite(greeting);
+      if (greeting) this._onWrite(greeting);
       this._onWrite(sentIdent);
     };
   }
@@ -275,22 +326,23 @@ class Protocol {
     this._packetRW.write.cleanup();
     this._cipher && this._cipher.free();
     this._decipher && this._decipher.free();
-    if (typeof reason !== 'string' || reason.length === 0)
-      reason = 'fatal error';
+    if (typeof reason !== "string" || reason.length === 0)
+      reason = "fatal error";
     this.parse = () => {
       throw new Error(`Instance unusable after ${reason}`);
     };
     this._onWrite = () => {
       throw new Error(`Instance unusable after ${reason}`);
     };
+    // @ts-expect-error TS(2322): Type 'undefined' is not assignable to type '(reaso... Remove this comment to see the full error message
     this._destruct = undefined;
   }
   cleanup() {
+    // @ts-expect-error TS(2554): Expected 1 arguments, but got 0.
     this._destruct && this._destruct();
   }
   parse(chunk, i, len) {
-    while (i < len)
-      i = this._parse(chunk, i, len);
+    while (i < len) i = this._parse(chunk, i, len);
   }
 
   // Protocol message API
@@ -315,7 +367,7 @@ class Protocol {
 
     packet[p] = MESSAGE.DISCONNECT;
     writeUInt32BE(packet, reason, ++p);
-    packet.fill(0, p += 4, end);
+    packet.fill(0, (p += 4), end);
 
     this._debug && this._debug(`Outbound: Sending DISCONNECT (${reason})`);
     sendPacket(this, this._packetRW.write.finalize(packet, true), true);
@@ -326,18 +378,19 @@ class Protocol {
 
     packet.set(PING_PAYLOAD, p);
 
-    this._debug && this._debug(
-      'Outbound: Sending ping (GLOBAL_REQUEST: keepalive@openssh.com)'
-    );
+    this._debug &&
+      this._debug(
+        "Outbound: Sending ping (GLOBAL_REQUEST: keepalive@openssh.com)"
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   rekey() {
     if (this._kexinit === undefined) {
-      this._debug && this._debug('Outbound: Initiated explicit rekey');
+      this._debug && this._debug("Outbound: Initiated explicit rekey");
       this._queue = [];
       kexinit(this);
     } else {
-      this._debug && this._debug('Outbound: Ignoring rekey during handshake');
+      this._debug && this._debug("Outbound: Ignoring rekey during handshake");
     }
   }
 
@@ -358,7 +411,7 @@ class Protocol {
       packet[p] = MESSAGE.REQUEST_SUCCESS;
     }
 
-    this._debug && this._debug('Outbound: Sending REQUEST_SUCCESS');
+    this._debug && this._debug("Outbound: Sending REQUEST_SUCCESS");
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   requestFailure() {
@@ -367,7 +420,7 @@ class Protocol {
 
     packet[p] = MESSAGE.REQUEST_FAILURE;
 
-    this._debug && this._debug('Outbound: Sending REQUEST_FAILURE');
+    this._debug && this._debug("Outbound: Sending REQUEST_FAILURE");
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   channelSuccess(chan) {
@@ -432,16 +485,17 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, amount, p += 4);
+    writeUInt32BE(packet, amount, (p += 4));
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_WINDOW_ADJUST (r:${chan}, ${amount})`
-    );
+    this._debug &&
+      this._debug(
+        `Outbound: Sending CHANNEL_WINDOW_ADJUST (r:${chan}, ${amount})`
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   channelData(chan, data) {
     const isBuffer = Buffer.isBuffer(data);
-    const dataLen = (isBuffer ? data.length : Buffer.byteLength(data));
+    const dataLen = isBuffer ? data.length : Buffer.byteLength(data);
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(1 + 4 + 4 + dataLen);
 
@@ -449,21 +503,18 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, dataLen, p += 4);
+    writeUInt32BE(packet, dataLen, (p += 4));
 
-    if (isBuffer)
-      packet.set(data, p += 4);
-    else
-      packet.utf8Write(data, p += 4, dataLen);
+    if (isBuffer) packet.set(data, (p += 4));
+    else packet.utf8Write(data, (p += 4), dataLen);
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_DATA (r:${chan}, ${dataLen})`
-    );
+    this._debug &&
+      this._debug(`Outbound: Sending CHANNEL_DATA (r:${chan}, ${dataLen})`);
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   channelExtData(chan, data, type) {
     const isBuffer = Buffer.isBuffer(data);
-    const dataLen = (isBuffer ? data.length : Buffer.byteLength(data));
+    const dataLen = isBuffer ? data.length : Buffer.byteLength(data);
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(1 + 4 + 4 + 4 + dataLen);
 
@@ -471,17 +522,15 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, type, p += 4);
+    writeUInt32BE(packet, type, (p += 4));
 
-    writeUInt32BE(packet, dataLen, p += 4);
+    writeUInt32BE(packet, dataLen, (p += 4));
 
-    if (isBuffer)
-      packet.set(data, p += 4);
-    else
-      packet.utf8Write(data, p += 4, dataLen);
+    if (isBuffer) packet.set(data, (p += 4));
+    else packet.utf8Write(data, (p += 4), dataLen);
 
-    this._debug
-      && this._debug(`Outbound: Sending CHANNEL_EXTENDED_DATA (r:${chan})`);
+    this._debug &&
+      this._debug(`Outbound: Sending CHANNEL_EXTENDED_DATA (r:${chan})`);
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   channelOpenConfirm(remote, local, initWindow, maxPacket) {
@@ -492,20 +541,20 @@ class Protocol {
 
     writeUInt32BE(packet, remote, ++p);
 
-    writeUInt32BE(packet, local, p += 4);
+    writeUInt32BE(packet, local, (p += 4));
 
-    writeUInt32BE(packet, initWindow, p += 4);
+    writeUInt32BE(packet, initWindow, (p += 4));
 
-    writeUInt32BE(packet, maxPacket, p += 4);
+    writeUInt32BE(packet, maxPacket, (p += 4));
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_OPEN_CONFIRMATION (r:${remote}, l:${local})`
-    );
+    this._debug &&
+      this._debug(
+        `Outbound: Sending CHANNEL_OPEN_CONFIRMATION (r:${remote}, l:${local})`
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   channelOpenFail(remote, reason, desc) {
-    if (typeof desc !== 'string')
-      desc = '';
+    if (typeof desc !== "string") desc = "";
 
     const descLen = Buffer.byteLength(desc);
     let p = this._packetRW.write.allocStart;
@@ -515,9 +564,9 @@ class Protocol {
 
     writeUInt32BE(packet, remote, ++p);
 
-    writeUInt32BE(packet, reason, p += 4);
+    writeUInt32BE(packet, reason, (p += 4));
 
-    writeUInt32BE(packet, descLen, p += 4);
+    writeUInt32BE(packet, descLen, (p += 4));
 
     p += 4;
     if (descLen) {
@@ -527,8 +576,8 @@ class Protocol {
 
     writeUInt32BE(packet, 0, p); // Empty language tag
 
-    this._debug
-      && this._debug(`Outbound: Sending CHANNEL_OPEN_FAILURE (r:${remote})`);
+    this._debug &&
+      this._debug(`Outbound: Sending CHANNEL_OPEN_FAILURE (r:${remote})`);
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
 
@@ -540,7 +589,7 @@ class Protocol {
   // ------
   service(name) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     const nameLen = Buffer.byteLength(name);
     let p = this._packetRW.write.allocStart;
@@ -549,7 +598,7 @@ class Protocol {
     packet[p] = MESSAGE.SERVICE_REQUEST;
 
     writeUInt32BE(packet, nameLen, ++p);
-    packet.utf8Write(name, p += 4, nameLen);
+    packet.utf8Write(name, (p += 4), nameLen);
 
     this._debug && this._debug(`Outbound: Sending SERVICE_REQUEST (${name})`);
     sendPacket(this, this._packetRW.write.finalize(packet));
@@ -559,62 +608,66 @@ class Protocol {
   // -------------------------------
   authPassword(username, password, newPassword) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     const userLen = Buffer.byteLength(username);
     const passLen = Buffer.byteLength(password);
-    const newPassLen = (newPassword ? Buffer.byteLength(newPassword) : 0);
+    const newPassLen = newPassword ? Buffer.byteLength(newPassword) : 0;
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(
-      1 + 4 + userLen + 4 + 14 + 4 + 8 + 1 + 4 + passLen
-        + (newPassword ? 4 + newPassLen : 0)
+      1 +
+        4 +
+        userLen +
+        4 +
+        14 +
+        4 +
+        8 +
+        1 +
+        4 +
+        passLen +
+        (newPassword ? 4 + newPassLen : 0)
     );
 
     packet[p] = MESSAGE.USERAUTH_REQUEST;
 
     writeUInt32BE(packet, userLen, ++p);
-    packet.utf8Write(username, p += 4, userLen);
+    packet.utf8Write(username, (p += 4), userLen);
 
-    writeUInt32BE(packet, 14, p += userLen);
-    packet.utf8Write('ssh-connection', p += 4, 14);
+    writeUInt32BE(packet, 14, (p += userLen));
+    packet.utf8Write("ssh-connection", (p += 4), 14);
 
-    writeUInt32BE(packet, 8, p += 14);
-    packet.utf8Write('password', p += 4, 8);
+    writeUInt32BE(packet, 8, (p += 14));
+    packet.utf8Write("password", (p += 4), 8);
 
-    packet[p += 8] = (newPassword ? 1 : 0);
+    packet[(p += 8)] = newPassword ? 1 : 0;
 
     writeUInt32BE(packet, passLen, ++p);
     if (Buffer.isBuffer(password))
-      bufferCopy(password, packet, 0, passLen, p += 4);
-    else
-      packet.utf8Write(password, p += 4, passLen);
+      bufferCopy(password, packet, 0, passLen, (p += 4));
+    else packet.utf8Write(password, (p += 4), passLen);
 
     if (newPassword) {
-      writeUInt32BE(packet, newPassLen, p += passLen);
+      writeUInt32BE(packet, newPassLen, (p += passLen));
       if (Buffer.isBuffer(newPassword))
-        bufferCopy(newPassword, packet, 0, newPassLen, p += 4);
-      else
-        packet.utf8Write(newPassword, p += 4, newPassLen);
-      this._debug && this._debug(
-        'Outbound: Sending USERAUTH_REQUEST (changed password)'
-      );
+        bufferCopy(newPassword, packet, 0, newPassLen, (p += 4));
+      else packet.utf8Write(newPassword, (p += 4), newPassLen);
+      this._debug &&
+        this._debug("Outbound: Sending USERAUTH_REQUEST (changed password)");
     } else {
-      this._debug && this._debug(
-        'Outbound: Sending USERAUTH_REQUEST (password)'
-      );
+      this._debug &&
+        this._debug("Outbound: Sending USERAUTH_REQUEST (password)");
     }
 
-    this._authsQueue.push('password');
+    this._authsQueue.push("password");
 
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   authPK(username, pubKey, cbSign) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     pubKey = parseKey(pubKey);
-    if (pubKey instanceof Error)
-      throw new Error('Invalid key');
+    if (pubKey instanceof Error) throw new Error("Invalid key");
 
     const keyType = pubKey.type;
     pubKey = pubKey.getPublicSSH();
@@ -625,15 +678,26 @@ class Protocol {
     const sessionID = this._kex.sessionID;
     const sesLen = sessionID.length;
     const payloadLen =
-      (cbSign ? 4 + sesLen : 0)
-        + 1 + 4 + userLen + 4 + 14 + 4 + 9 + 1 + 4 + algoLen + 4 + pubKeyLen;
+      (cbSign ? 4 + sesLen : 0) +
+      1 +
+      4 +
+      userLen +
+      4 +
+      14 +
+      4 +
+      9 +
+      1 +
+      4 +
+      algoLen +
+      4 +
+      pubKeyLen;
     let packet;
     let p;
     if (cbSign) {
       packet = Buffer.allocUnsafe(payloadLen);
       p = 0;
       writeUInt32BE(packet, sesLen, p);
-      packet.set(sessionID, p += 4);
+      packet.set(sessionID, (p += 4));
       p += sesLen;
     } else {
       packet = this._packetRW.write.alloc(payloadLen);
@@ -643,28 +707,27 @@ class Protocol {
     packet[p] = MESSAGE.USERAUTH_REQUEST;
 
     writeUInt32BE(packet, userLen, ++p);
-    packet.utf8Write(username, p += 4, userLen);
+    packet.utf8Write(username, (p += 4), userLen);
 
-    writeUInt32BE(packet, 14, p += userLen);
-    packet.utf8Write('ssh-connection', p += 4, 14);
+    writeUInt32BE(packet, 14, (p += userLen));
+    packet.utf8Write("ssh-connection", (p += 4), 14);
 
-    writeUInt32BE(packet, 9, p += 14);
-    packet.utf8Write('publickey', p += 4, 9);
+    writeUInt32BE(packet, 9, (p += 14));
+    packet.utf8Write("publickey", (p += 4), 9);
 
-    packet[p += 9] = (cbSign ? 1 : 0);
+    packet[(p += 9)] = cbSign ? 1 : 0;
 
     writeUInt32BE(packet, algoLen, ++p);
-    packet.utf8Write(keyType, p += 4, algoLen);
+    packet.utf8Write(keyType, (p += 4), algoLen);
 
-    writeUInt32BE(packet, pubKeyLen, p += algoLen);
-    packet.set(pubKey, p += 4);
+    writeUInt32BE(packet, pubKeyLen, (p += algoLen));
+    packet.set(pubKey, (p += 4));
 
     if (!cbSign) {
-      this._authsQueue.push('publickey');
+      this._authsQueue.push("publickey");
 
-      this._debug && this._debug(
-        'Outbound: Sending USERAUTH_REQUEST (publickey -- check)'
-      );
+      this._debug &&
+        this._debug("Outbound: Sending USERAUTH_REQUEST (publickey -- check)");
       sendPacket(this, this._packetRW.write.finalize(packet));
       return;
     }
@@ -672,13 +735,28 @@ class Protocol {
     cbSign(packet, (signature) => {
       signature = convertSignature(signature, keyType);
       if (signature === false)
-        throw new Error('Error while converting handshake signature');
+        throw new Error("Error while converting handshake signature");
 
       const sigLen = signature.length;
       p = this._packetRW.write.allocStart;
       packet = this._packetRW.write.alloc(
-        1 + 4 + userLen + 4 + 14 + 4 + 9 + 1 + 4 + algoLen + 4 + pubKeyLen + 4
-          + 4 + algoLen + 4 + sigLen
+        1 +
+          4 +
+          userLen +
+          4 +
+          14 +
+          4 +
+          9 +
+          1 +
+          4 +
+          algoLen +
+          4 +
+          pubKeyLen +
+          4 +
+          4 +
+          algoLen +
+          4 +
+          sigLen
       );
 
       // TODO: simply copy from original "packet" to new `packet` to avoid
@@ -686,48 +764,46 @@ class Protocol {
       packet[p] = MESSAGE.USERAUTH_REQUEST;
 
       writeUInt32BE(packet, userLen, ++p);
-      packet.utf8Write(username, p += 4, userLen);
+      packet.utf8Write(username, (p += 4), userLen);
 
-      writeUInt32BE(packet, 14, p += userLen);
-      packet.utf8Write('ssh-connection', p += 4, 14);
+      writeUInt32BE(packet, 14, (p += userLen));
+      packet.utf8Write("ssh-connection", (p += 4), 14);
 
-      writeUInt32BE(packet, 9, p += 14);
-      packet.utf8Write('publickey', p += 4, 9);
+      writeUInt32BE(packet, 9, (p += 14));
+      packet.utf8Write("publickey", (p += 4), 9);
 
-      packet[p += 9] = 1;
+      packet[(p += 9)] = 1;
 
       writeUInt32BE(packet, algoLen, ++p);
-      packet.utf8Write(keyType, p += 4, algoLen);
+      packet.utf8Write(keyType, (p += 4), algoLen);
 
-      writeUInt32BE(packet, pubKeyLen, p += algoLen);
-      packet.set(pubKey, p += 4);
+      writeUInt32BE(packet, pubKeyLen, (p += algoLen));
+      packet.set(pubKey, (p += 4));
 
-      writeUInt32BE(packet, 4 + algoLen + 4 + sigLen, p += pubKeyLen);
+      writeUInt32BE(packet, 4 + algoLen + 4 + sigLen, (p += pubKeyLen));
 
-      writeUInt32BE(packet, algoLen, p += 4);
-      packet.utf8Write(keyType, p += 4, algoLen);
+      writeUInt32BE(packet, algoLen, (p += 4));
+      packet.utf8Write(keyType, (p += 4), algoLen);
 
-      writeUInt32BE(packet, sigLen, p += algoLen);
-      packet.set(signature, p += 4);
+      writeUInt32BE(packet, sigLen, (p += algoLen));
+      packet.set(signature, (p += 4));
 
       // Servers shouldn't send packet type 60 in response to signed publickey
       // attempts, but if they do, interpret as type 60.
-      this._authsQueue.push('publickey');
+      this._authsQueue.push("publickey");
 
-      this._debug && this._debug(
-        'Outbound: Sending USERAUTH_REQUEST (publickey)'
-      );
+      this._debug &&
+        this._debug("Outbound: Sending USERAUTH_REQUEST (publickey)");
       sendPacket(this, this._packetRW.write.finalize(packet));
     });
   }
   authHostbased(username, pubKey, hostname, userlocal, cbSign) {
     // TODO: Make DRY by sharing similar code with authPK()
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     pubKey = parseKey(pubKey);
-    if (pubKey instanceof Error)
-      throw new Error('Invalid key');
+    if (pubKey instanceof Error) throw new Error("Invalid key");
 
     const keyType = pubKey.type;
     pubKey = pubKey.getPublicSSH();
@@ -740,44 +816,59 @@ class Protocol {
     const hostnameLen = Buffer.byteLength(hostname);
     const userlocalLen = Buffer.byteLength(userlocal);
     const data = Buffer.allocUnsafe(
-      4 + sesLen + 1 + 4 + userLen + 4 + 14 + 4 + 9 + 4 + algoLen
-        + 4 + pubKeyLen + 4 + hostnameLen + 4 + userlocalLen
+      4 +
+        sesLen +
+        1 +
+        4 +
+        userLen +
+        4 +
+        14 +
+        4 +
+        9 +
+        4 +
+        algoLen +
+        4 +
+        pubKeyLen +
+        4 +
+        hostnameLen +
+        4 +
+        userlocalLen
     );
     let p = 0;
 
     writeUInt32BE(data, sesLen, p);
-    data.set(sessionID, p += 4);
+    data.set(sessionID, (p += 4));
 
-    data[p += sesLen] = MESSAGE.USERAUTH_REQUEST;
+    data[(p += sesLen)] = MESSAGE.USERAUTH_REQUEST;
 
     writeUInt32BE(data, userLen, ++p);
-    data.utf8Write(username, p += 4, userLen);
+    (data as any).utf8Write(username, (p += 4), userLen);
 
-    writeUInt32BE(data, 14, p += userLen);
-    data.utf8Write('ssh-connection', p += 4, 14);
+    writeUInt32BE(data, 14, (p += userLen));
+    (data as any).utf8Write("ssh-connection", (p += 4), 14);
 
-    writeUInt32BE(data, 9, p += 14);
-    data.utf8Write('hostbased', p += 4, 9);
+    writeUInt32BE(data, 9, (p += 14));
+    (data as any).utf8Write("hostbased", (p += 4), 9);
 
-    writeUInt32BE(data, algoLen, p += 9);
-    data.utf8Write(keyType, p += 4, algoLen);
+    writeUInt32BE(data, algoLen, (p += 9));
+    (data as any).utf8Write(keyType, (p += 4), algoLen);
 
-    writeUInt32BE(data, pubKeyLen, p += algoLen);
-    data.set(pubKey, p += 4);
+    writeUInt32BE(data, pubKeyLen, (p += algoLen));
+    data.set(pubKey, (p += 4));
 
-    writeUInt32BE(data, hostnameLen, p += pubKeyLen);
-    data.utf8Write(hostname, p += 4, hostnameLen);
+    writeUInt32BE(data, hostnameLen, (p += pubKeyLen));
+    (data as any).utf8Write(hostname, (p += 4), hostnameLen);
 
-    writeUInt32BE(data, userlocalLen, p += hostnameLen);
-    data.utf8Write(userlocal, p += 4, userlocalLen);
+    writeUInt32BE(data, userlocalLen, (p += hostnameLen));
+    (data as any).utf8Write(userlocal, (p += 4), userlocalLen);
 
     cbSign(data, (signature) => {
       signature = convertSignature(signature, keyType);
       if (!signature)
-        throw new Error('Error while converting handshake signature');
+        throw new Error("Error while converting handshake signature");
 
       const sigLen = signature.length;
-      const reqDataLen = (data.length - sesLen - 4);
+      const reqDataLen = data.length - sesLen - 4;
       p = this._packetRW.write.allocStart;
       const packet = this._packetRW.write.alloc(
         reqDataLen + 4 + 4 + algoLen + 4 + sigLen
@@ -785,23 +876,22 @@ class Protocol {
 
       bufferCopy(data, packet, 4 + sesLen, data.length, p);
 
-      writeUInt32BE(packet, 4 + algoLen + 4 + sigLen, p += reqDataLen);
-      writeUInt32BE(packet, algoLen, p += 4);
-      packet.utf8Write(keyType, p += 4, algoLen);
-      writeUInt32BE(packet, sigLen, p += algoLen);
-      packet.set(signature, p += 4);
+      writeUInt32BE(packet, 4 + algoLen + 4 + sigLen, (p += reqDataLen));
+      writeUInt32BE(packet, algoLen, (p += 4));
+      packet.utf8Write(keyType, (p += 4), algoLen);
+      writeUInt32BE(packet, sigLen, (p += algoLen));
+      packet.set(signature, (p += 4));
 
-      this._authsQueue.push('hostbased');
+      this._authsQueue.push("hostbased");
 
-      this._debug && this._debug(
-        'Outbound: Sending USERAUTH_REQUEST (hostbased)'
-      );
+      this._debug &&
+        this._debug("Outbound: Sending USERAUTH_REQUEST (hostbased)");
       sendPacket(this, this._packetRW.write.finalize(packet));
     });
   }
   authKeyboard(username) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     const userLen = Buffer.byteLength(username);
     let p = this._packetRW.write.allocStart;
@@ -812,28 +902,27 @@ class Protocol {
     packet[p] = MESSAGE.USERAUTH_REQUEST;
 
     writeUInt32BE(packet, userLen, ++p);
-    packet.utf8Write(username, p += 4, userLen);
+    packet.utf8Write(username, (p += 4), userLen);
 
-    writeUInt32BE(packet, 14, p += userLen);
-    packet.utf8Write('ssh-connection', p += 4, 14);
+    writeUInt32BE(packet, 14, (p += userLen));
+    packet.utf8Write("ssh-connection", (p += 4), 14);
 
-    writeUInt32BE(packet, 20, p += 14);
-    packet.utf8Write('keyboard-interactive', p += 4, 20);
+    writeUInt32BE(packet, 20, (p += 14));
+    packet.utf8Write("keyboard-interactive", (p += 4), 20);
 
-    writeUInt32BE(packet, 0, p += 20);
+    writeUInt32BE(packet, 0, (p += 20));
 
-    writeUInt32BE(packet, 0, p += 4);
+    writeUInt32BE(packet, 0, (p += 4));
 
-    this._authsQueue.push('keyboard-interactive');
+    this._authsQueue.push("keyboard-interactive");
 
-    this._debug && this._debug(
-      'Outbound: Sending USERAUTH_REQUEST (keyboard-interactive)'
-    );
+    this._debug &&
+      this._debug("Outbound: Sending USERAUTH_REQUEST (keyboard-interactive)");
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   authNone(username) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     const userLen = Buffer.byteLength(username);
     let p = this._packetRW.write.allocStart;
@@ -842,22 +931,22 @@ class Protocol {
     packet[p] = MESSAGE.USERAUTH_REQUEST;
 
     writeUInt32BE(packet, userLen, ++p);
-    packet.utf8Write(username, p += 4, userLen);
+    packet.utf8Write(username, (p += 4), userLen);
 
-    writeUInt32BE(packet, 14, p += userLen);
-    packet.utf8Write('ssh-connection', p += 4, 14);
+    writeUInt32BE(packet, 14, (p += userLen));
+    packet.utf8Write("ssh-connection", (p += 4), 14);
 
-    writeUInt32BE(packet, 4, p += 14);
-    packet.utf8Write('none', p += 4, 4);
+    writeUInt32BE(packet, 4, (p += 14));
+    packet.utf8Write("none", (p += 4), 4);
 
-    this._authsQueue.push('none');
+    this._authsQueue.push("none");
 
-    this._debug && this._debug('Outbound: Sending USERAUTH_REQUEST (none)');
+    this._debug && this._debug("Outbound: Sending USERAUTH_REQUEST (none)");
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   authInfoRes(responses) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     let responsesTotalLen = 0;
     let responseLens;
@@ -892,7 +981,7 @@ class Protocol {
       writeUInt32BE(packet, 0, ++p);
     }
 
-    this._debug && this._debug('Outbound: Sending USERAUTH_INFO_RESPONSE');
+    this._debug && this._debug("Outbound: Sending USERAUTH_INFO_RESPONSE");
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
 
@@ -900,7 +989,7 @@ class Protocol {
   // ---------------------------------
   tcpipForward(bindAddr, bindPort, wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     const addrLen = Buffer.byteLength(bindAddr);
     let p = this._packetRW.write.allocStart;
@@ -909,22 +998,22 @@ class Protocol {
     packet[p] = MESSAGE.GLOBAL_REQUEST;
 
     writeUInt32BE(packet, 13, ++p);
-    packet.utf8Write('tcpip-forward', p += 4, 13);
+    packet.utf8Write("tcpip-forward", (p += 4), 13);
 
-    packet[p += 13] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 13)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
     writeUInt32BE(packet, addrLen, ++p);
-    packet.utf8Write(bindAddr, p += 4, addrLen);
+    packet.utf8Write(bindAddr, (p += 4), addrLen);
 
-    writeUInt32BE(packet, bindPort, p += addrLen);
+    writeUInt32BE(packet, bindPort, (p += addrLen));
 
-    this._debug
-      && this._debug('Outbound: Sending GLOBAL_REQUEST (tcpip-forward)');
+    this._debug &&
+      this._debug("Outbound: Sending GLOBAL_REQUEST (tcpip-forward)");
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   cancelTcpipForward(bindAddr, bindPort, wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     const addrLen = Buffer.byteLength(bindAddr);
     let p = this._packetRW.write.allocStart;
@@ -933,22 +1022,22 @@ class Protocol {
     packet[p] = MESSAGE.GLOBAL_REQUEST;
 
     writeUInt32BE(packet, 20, ++p);
-    packet.utf8Write('cancel-tcpip-forward', p += 4, 20);
+    packet.utf8Write("cancel-tcpip-forward", (p += 4), 20);
 
-    packet[p += 20] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 20)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
     writeUInt32BE(packet, addrLen, ++p);
-    packet.utf8Write(bindAddr, p += 4, addrLen);
+    packet.utf8Write(bindAddr, (p += 4), addrLen);
 
-    writeUInt32BE(packet, bindPort, p += addrLen);
+    writeUInt32BE(packet, bindPort, (p += addrLen));
 
-    this._debug
-      && this._debug('Outbound: Sending GLOBAL_REQUEST (cancel-tcpip-forward)');
+    this._debug &&
+      this._debug("Outbound: Sending GLOBAL_REQUEST (cancel-tcpip-forward)");
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   openssh_streamLocalForward(socketPath, wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     const socketPathLen = Buffer.byteLength(socketPath);
     let p = this._packetRW.write.allocStart;
@@ -959,21 +1048,22 @@ class Protocol {
     packet[p] = MESSAGE.GLOBAL_REQUEST;
 
     writeUInt32BE(packet, 31, ++p);
-    packet.utf8Write('streamlocal-forward@openssh.com', p += 4, 31);
+    packet.utf8Write("streamlocal-forward@openssh.com", (p += 4), 31);
 
-    packet[p += 31] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 31)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
     writeUInt32BE(packet, socketPathLen, ++p);
-    packet.utf8Write(socketPath, p += 4, socketPathLen);
+    packet.utf8Write(socketPath, (p += 4), socketPathLen);
 
-    this._debug && this._debug(
-      'Outbound: Sending GLOBAL_REQUEST (streamlocal-forward@openssh.com)'
-    );
+    this._debug &&
+      this._debug(
+        "Outbound: Sending GLOBAL_REQUEST (streamlocal-forward@openssh.com)"
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   openssh_cancelStreamLocalForward(socketPath, wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     const socketPathLen = Buffer.byteLength(socketPath);
     let p = this._packetRW.write.allocStart;
@@ -984,27 +1074,27 @@ class Protocol {
     packet[p] = MESSAGE.GLOBAL_REQUEST;
 
     writeUInt32BE(packet, 38, ++p);
-    packet.utf8Write('cancel-streamlocal-forward@openssh.com', p += 4, 38);
+    packet.utf8Write("cancel-streamlocal-forward@openssh.com", (p += 4), 38);
 
-    packet[p += 38] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 38)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
     writeUInt32BE(packet, socketPathLen, ++p);
-    packet.utf8Write(socketPath, p += 4, socketPathLen);
+    packet.utf8Write(socketPath, (p += 4), socketPathLen);
 
     if (this._debug) {
       this._debug(
-        'Outbound: Sending GLOBAL_REQUEST '
-          + '(cancel-streamlocal-forward@openssh.com)'
+        "Outbound: Sending GLOBAL_REQUEST " +
+          "(cancel-streamlocal-forward@openssh.com)"
       );
     }
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
-  directTcpip(chan, initWindow, maxPacket, cfg) {
+  directTcpip(chan, initWindow, maxPacket, { srcIP, dstIP, dstPort, srcPort }) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    const srcLen = Buffer.byteLength(cfg.srcIP);
-    const dstLen = Buffer.byteLength(cfg.dstIP);
+    const srcLen = Buffer.byteLength(srcIP);
+    const dstLen = Buffer.byteLength(dstIP);
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(
       1 + 4 + 12 + 4 + 4 + 4 + 4 + srcLen + 4 + 4 + dstLen + 4
@@ -1013,34 +1103,33 @@ class Protocol {
     packet[p] = MESSAGE.CHANNEL_OPEN;
 
     writeUInt32BE(packet, 12, ++p);
-    packet.utf8Write('direct-tcpip', p += 4, 12);
+    packet.utf8Write("direct-tcpip", (p += 4), 12);
 
-    writeUInt32BE(packet, chan, p += 12);
+    writeUInt32BE(packet, chan, (p += 12));
 
-    writeUInt32BE(packet, initWindow, p += 4);
+    writeUInt32BE(packet, initWindow, (p += 4));
 
-    writeUInt32BE(packet, maxPacket, p += 4);
+    writeUInt32BE(packet, maxPacket, (p += 4));
 
-    writeUInt32BE(packet, dstLen, p += 4);
-    packet.utf8Write(cfg.dstIP, p += 4, dstLen);
+    writeUInt32BE(packet, dstLen, (p += 4));
+    packet.utf8Write(dstIP, (p += 4), dstLen);
 
-    writeUInt32BE(packet, cfg.dstPort, p += dstLen);
+    writeUInt32BE(packet, dstPort, (p += dstLen));
 
-    writeUInt32BE(packet, srcLen, p += 4);
-    packet.utf8Write(cfg.srcIP, p += 4, srcLen);
+    writeUInt32BE(packet, srcLen, (p += 4));
+    packet.utf8Write(srcIP, (p += 4), srcLen);
 
-    writeUInt32BE(packet, cfg.srcPort, p += srcLen);
+    writeUInt32BE(packet, srcPort, (p += srcLen));
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_OPEN (r:${chan}, direct-tcpip)`
-    );
+    this._debug &&
+      this._debug(`Outbound: Sending CHANNEL_OPEN (r:${chan}, direct-tcpip)`);
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
-  openssh_directStreamLocal(chan, initWindow, maxPacket, cfg) {
+  openssh_directStreamLocal(chan, initWindow, maxPacket, { socketPath }) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    const pathLen = Buffer.byteLength(cfg.socketPath);
+    const pathLen = Buffer.byteLength(socketPath);
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(
       1 + 4 + 30 + 4 + 4 + 4 + 4 + pathLen + 4 + 4
@@ -1049,31 +1138,30 @@ class Protocol {
     packet[p] = MESSAGE.CHANNEL_OPEN;
 
     writeUInt32BE(packet, 30, ++p);
-    packet.utf8Write('direct-streamlocal@openssh.com', p += 4, 30);
+    packet.utf8Write("direct-streamlocal@openssh.com", (p += 4), 30);
 
-    writeUInt32BE(packet, chan, p += 30);
+    writeUInt32BE(packet, chan, (p += 30));
 
-    writeUInt32BE(packet, initWindow, p += 4);
+    writeUInt32BE(packet, initWindow, (p += 4));
 
-    writeUInt32BE(packet, maxPacket, p += 4);
+    writeUInt32BE(packet, maxPacket, (p += 4));
 
-    writeUInt32BE(packet, pathLen, p += 4);
-    packet.utf8Write(cfg.socketPath, p += 4, pathLen);
+    writeUInt32BE(packet, pathLen, (p += 4));
+    packet.utf8Write(socketPath, (p += 4), pathLen);
 
     // zero-fill reserved fields (string and uint32)
-    bufferFill(packet, 0, p += pathLen, p + 8);
+    bufferFill(packet, 0, (p += pathLen), p + 8);
 
     if (this._debug) {
       this._debug(
-        'Outbound: Sending CHANNEL_OPEN '
-          + `(r:${chan}, direct-streamlocal@openssh.com)`
+        `Outbound: Sending CHANNEL_OPEN ${`(r:${chan}, direct-streamlocal@openssh.com)`}`
       );
     }
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   openssh_noMoreSessions(wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(1 + 4 + 28 + 1);
@@ -1081,18 +1169,19 @@ class Protocol {
     packet[p] = MESSAGE.GLOBAL_REQUEST;
 
     writeUInt32BE(packet, 28, ++p);
-    packet.utf8Write('no-more-sessions@openssh.com', p += 4, 28);
+    packet.utf8Write("no-more-sessions@openssh.com", (p += 4), 28);
 
-    packet[p += 28] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 28)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
-    this._debug && this._debug(
-      'Outbound: Sending GLOBAL_REQUEST (no-more-sessions@openssh.com)'
-    );
+    this._debug &&
+      this._debug(
+        "Outbound: Sending GLOBAL_REQUEST (no-more-sessions@openssh.com)"
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   session(chan, initWindow, maxPacket) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     // Does not consume window space
 
@@ -1102,21 +1191,21 @@ class Protocol {
     packet[p] = MESSAGE.CHANNEL_OPEN;
 
     writeUInt32BE(packet, 7, ++p);
-    packet.utf8Write('session', p += 4, 7);
+    packet.utf8Write("session", (p += 4), 7);
 
-    writeUInt32BE(packet, chan, p += 7);
+    writeUInt32BE(packet, chan, (p += 7));
 
-    writeUInt32BE(packet, initWindow, p += 4);
+    writeUInt32BE(packet, initWindow, (p += 4));
 
-    writeUInt32BE(packet, maxPacket, p += 4);
+    writeUInt32BE(packet, maxPacket, (p += 4));
 
-    this._debug
-      && this._debug(`Outbound: Sending CHANNEL_OPEN (r:${chan}, session)`);
+    this._debug &&
+      this._debug(`Outbound: Sending CHANNEL_OPEN (r:${chan}, session)`);
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   windowChange(chan, rows, cols, height, width) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     // Does not consume window space
 
@@ -1129,41 +1218,42 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, 13, p += 4);
-    packet.utf8Write('window-change', p += 4, 13);
+    writeUInt32BE(packet, 13, (p += 4));
+    packet.utf8Write("window-change", (p += 4), 13);
 
-    packet[p += 13] = 0;
+    packet[(p += 13)] = 0;
 
     writeUInt32BE(packet, cols, ++p);
 
-    writeUInt32BE(packet, rows, p += 4);
+    writeUInt32BE(packet, rows, (p += 4));
 
-    writeUInt32BE(packet, width, p += 4);
+    writeUInt32BE(packet, width, (p += 4));
 
-    writeUInt32BE(packet, height, p += 4);
+    writeUInt32BE(packet, height, (p += 4));
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_REQUEST (r:${chan}, window-change)`
-    );
+    this._debug &&
+      this._debug(
+        `Outbound: Sending CHANNEL_REQUEST (r:${chan}, window-change)`
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   pty(chan, rows, cols, height, width, term, modes, wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     // Does not consume window space
 
-    if (!term || !term.length)
-      term = 'vt100';
-    if (modes
-        && !Buffer.isBuffer(modes)
-        && !Array.isArray(modes)
-        && typeof modes === 'object'
-        && modes !== null) {
+    if (!term || !term.length) term = "vt100";
+    if (
+      modes &&
+      !Buffer.isBuffer(modes) &&
+      !Array.isArray(modes) &&
+      typeof modes === "object" &&
+      modes !== null
+    ) {
       modes = modesToBytes(modes);
     }
-    if (!modes || !modes.length)
-      modes = NO_TERMINAL_MODES_BUFFER;
+    if (!modes || !modes.length) modes = NO_TERMINAL_MODES_BUFFER;
 
     const termLen = term.length;
     const modesLen = modes.length;
@@ -1176,38 +1266,37 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, 7, p += 4);
-    packet.utf8Write('pty-req', p += 4, 7);
+    writeUInt32BE(packet, 7, (p += 4));
+    packet.utf8Write("pty-req", (p += 4), 7);
 
-    packet[p += 7] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 7)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
     writeUInt32BE(packet, termLen, ++p);
-    packet.utf8Write(term, p += 4, termLen);
+    packet.utf8Write(term, (p += 4), termLen);
 
-    writeUInt32BE(packet, cols, p += termLen);
+    writeUInt32BE(packet, cols, (p += termLen));
 
-    writeUInt32BE(packet, rows, p += 4);
+    writeUInt32BE(packet, rows, (p += 4));
 
-    writeUInt32BE(packet, width, p += 4);
+    writeUInt32BE(packet, width, (p += 4));
 
-    writeUInt32BE(packet, height, p += 4);
+    writeUInt32BE(packet, height, (p += 4));
 
-    writeUInt32BE(packet, modesLen, p += 4);
+    writeUInt32BE(packet, modesLen, (p += 4));
     p += 4;
     if (Array.isArray(modes)) {
-      for (let i = 0; i < modesLen; ++i)
-        packet[p++] = modes[i];
+      for (let i = 0; i < modesLen; ++i) packet[p++] = modes[i];
     } else if (Buffer.isBuffer(modes)) {
       packet.set(modes, p);
     }
 
-    this._debug
-      && this._debug(`Outbound: Sending CHANNEL_REQUEST (r:${chan}, pty-req)`);
+    this._debug &&
+      this._debug(`Outbound: Sending CHANNEL_REQUEST (r:${chan}, pty-req)`);
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   shell(chan, wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     // Does not consume window space
 
@@ -1218,23 +1307,23 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, 5, p += 4);
-    packet.utf8Write('shell', p += 4, 5);
+    writeUInt32BE(packet, 5, (p += 4));
+    packet.utf8Write("shell", (p += 4), 5);
 
-    packet[p += 5] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 5)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
-    this._debug
-      && this._debug(`Outbound: Sending CHANNEL_REQUEST (r:${chan}, shell)`);
+    this._debug &&
+      this._debug(`Outbound: Sending CHANNEL_REQUEST (r:${chan}, shell)`);
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   exec(chan, cmd, wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     // Does not consume window space
 
     const isBuf = Buffer.isBuffer(cmd);
-    const cmdLen = (isBuf ? cmd.length : Buffer.byteLength(cmd));
+    const cmdLen = isBuf ? cmd.length : Buffer.byteLength(cmd);
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(1 + 4 + 4 + 4 + 1 + 4 + cmdLen);
 
@@ -1242,36 +1331,33 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, 4, p += 4);
-    packet.utf8Write('exec', p += 4, 4);
+    writeUInt32BE(packet, 4, (p += 4));
+    packet.utf8Write("exec", (p += 4), 4);
 
-    packet[p += 4] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 4)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
     writeUInt32BE(packet, cmdLen, ++p);
-    if (isBuf)
-      packet.set(cmd, p += 4);
-    else
-      packet.utf8Write(cmd, p += 4, cmdLen);
+    if (isBuf) packet.set(cmd, (p += 4));
+    else packet.utf8Write(cmd, (p += 4), cmdLen);
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_REQUEST (r:${chan}, exec: ${cmd})`
-    );
+    this._debug &&
+      this._debug(
+        `Outbound: Sending CHANNEL_REQUEST (r:${chan}, exec: ${cmd})`
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   signal(chan, signal) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     // Does not consume window space
 
     const origSignal = signal;
 
     signal = signal.toUpperCase();
-    if (signal.slice(0, 3) === 'SIG')
-      signal = signal.slice(3);
+    if (signal.slice(0, 3) === "SIG") signal = signal.slice(3);
 
-    if (SIGNALS[signal] !== 1)
-      throw new Error(`Invalid signal: ${origSignal}`);
+    if (SIGNALS[signal] !== 1) throw new Error(`Invalid signal: ${origSignal}`);
 
     const signalLen = signal.length;
     let p = this._packetRW.write.allocStart;
@@ -1283,28 +1369,29 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, 6, p += 4);
-    packet.utf8Write('signal', p += 4, 6);
+    writeUInt32BE(packet, 6, (p += 4));
+    packet.utf8Write("signal", (p += 4), 6);
 
-    packet[p += 6] = 0;
+    packet[(p += 6)] = 0;
 
     writeUInt32BE(packet, signalLen, ++p);
-    packet.utf8Write(signal, p += 4, signalLen);
+    packet.utf8Write(signal, (p += 4), signalLen);
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_REQUEST (r:${chan}, signal: ${signal})`
-    );
+    this._debug &&
+      this._debug(
+        `Outbound: Sending CHANNEL_REQUEST (r:${chan}, signal: ${signal})`
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   env(chan, key, val, wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     // Does not consume window space
 
     const keyLen = Buffer.byteLength(key);
     const isBuf = Buffer.isBuffer(val);
-    const valLen = (isBuf ? val.length : Buffer.byteLength(val));
+    const valLen = isBuf ? val.length : Buffer.byteLength(val);
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(
       1 + 4 + 4 + 3 + 1 + 4 + keyLen + 4 + valLen
@@ -1314,41 +1401,36 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, 3, p += 4);
-    packet.utf8Write('env', p += 4, 3);
+    writeUInt32BE(packet, 3, (p += 4));
+    packet.utf8Write("env", (p += 4), 3);
 
-    packet[p += 3] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 3)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
     writeUInt32BE(packet, keyLen, ++p);
-    packet.utf8Write(key, p += 4, keyLen);
+    packet.utf8Write(key, (p += 4), keyLen);
 
-    writeUInt32BE(packet, valLen, p += keyLen);
-    if (isBuf)
-      packet.set(val, p += 4);
-    else
-      packet.utf8Write(val, p += 4, valLen);
+    writeUInt32BE(packet, valLen, (p += keyLen));
+    if (isBuf) packet.set(val, (p += 4));
+    else packet.utf8Write(val, (p += 4), valLen);
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_REQUEST (r:${chan}, env: ${key}=${val})`
-    );
+    this._debug &&
+      this._debug(
+        `Outbound: Sending CHANNEL_REQUEST (r:${chan}, env: ${key}=${val})`
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   x11Forward(chan, cfg, wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     // Does not consume window space
 
     const protocol = cfg.protocol;
     const cookie = cfg.cookie;
     const isBufProto = Buffer.isBuffer(protocol);
-    const protoLen = (isBufProto
-                      ? protocol.length
-                      : Buffer.byteLength(protocol));
+    const protoLen = isBufProto ? protocol.length : Buffer.byteLength(protocol);
     const isBufCookie = Buffer.isBuffer(cookie);
-    const cookieLen = (isBufCookie
-                       ? cookie.length
-                       : Buffer.byteLength(cookie));
+    const cookieLen = isBufCookie ? cookie.length : Buffer.byteLength(cookie);
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(
       1 + 4 + 4 + 7 + 1 + 1 + 4 + protoLen + 4 + cookieLen + 4
@@ -1358,34 +1440,30 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, 7, p += 4);
-    packet.utf8Write('x11-req', p += 4, 7);
+    writeUInt32BE(packet, 7, (p += 4));
+    packet.utf8Write("x11-req", (p += 4), 7);
 
-    packet[p += 7] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 7)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
-    packet[++p] = (cfg.single ? 1 : 0);
+    packet[++p] = cfg.single ? 1 : 0;
 
     writeUInt32BE(packet, protoLen, ++p);
-    if (isBufProto)
-      packet.set(protocol, p += 4);
-    else
-      packet.utf8Write(protocol, p += 4, protoLen);
+    if (isBufProto) packet.set(protocol, (p += 4));
+    else packet.utf8Write(protocol, (p += 4), protoLen);
 
-    writeUInt32BE(packet, cookieLen, p += protoLen);
-    if (isBufCookie)
-      packet.set(cookie, p += 4);
-    else
-      packet.latin1Write(cookie, p += 4, cookieLen);
+    writeUInt32BE(packet, cookieLen, (p += protoLen));
+    if (isBufCookie) packet.set(cookie, (p += 4));
+    else packet.latin1Write(cookie, (p += 4), cookieLen);
 
-    writeUInt32BE(packet, (cfg.screen || 0), p += cookieLen);
+    writeUInt32BE(packet, cfg.screen || 0, (p += cookieLen));
 
-    this._debug
-      && this._debug(`Outbound: Sending CHANNEL_REQUEST (r:${chan}, x11-req)`);
+    this._debug &&
+      this._debug(`Outbound: Sending CHANNEL_REQUEST (r:${chan}, x11-req)`);
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   subsystem(chan, name, wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     // Does not consume window space
     const nameLen = Buffer.byteLength(name);
@@ -1396,22 +1474,23 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, 9, p += 4);
-    packet.utf8Write('subsystem', p += 4, 9);
+    writeUInt32BE(packet, 9, (p += 4));
+    packet.utf8Write("subsystem", (p += 4), 9);
 
-    packet[p += 9] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 9)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
     writeUInt32BE(packet, nameLen, ++p);
-    packet.utf8Write(name, p += 4, nameLen);
+    packet.utf8Write(name, (p += 4), nameLen);
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_REQUEST (r:${chan}, subsystem: ${name})`
-    );
+    this._debug &&
+      this._debug(
+        `Outbound: Sending CHANNEL_REQUEST (r:${chan}, subsystem: ${name})`
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   openssh_agentForward(chan, wantReply) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     // Does not consume window space
 
@@ -1422,28 +1501,28 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, 26, p += 4);
-    packet.utf8Write('auth-agent-req@openssh.com', p += 4, 26);
+    writeUInt32BE(packet, 26, (p += 4));
+    packet.utf8Write("auth-agent-req@openssh.com", (p += 4), 26);
 
-    packet[p += 26] = (wantReply === undefined || wantReply === true ? 1 : 0);
+    packet[(p += 26)] = wantReply === undefined || wantReply === true ? 1 : 0;
 
     if (this._debug) {
       this._debug(
-        'Outbound: Sending CHANNEL_REQUEST '
-          + `(r:${chan}, auth-agent-req@openssh.com)`
+        `Outbound: Sending CHANNEL_REQUEST ${`(r:${chan}, auth-agent-req@openssh.com)`}`
       );
     }
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   openssh_hostKeysProve(keys) {
     if (this._server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     let keysTotal = 0;
     const publicKeys = [];
     for (const key of keys) {
       const publicKey = key.getPublicSSH();
       keysTotal += 4 + publicKey.length;
+      // @ts-expect-error TS(2345): Argument of type 'any' is not assignable to parame... Remove this comment to see the full error message
       publicKeys.push(publicKey);
     }
 
@@ -1453,20 +1532,20 @@ class Protocol {
     packet[p] = MESSAGE.GLOBAL_REQUEST;
 
     writeUInt32BE(packet, 29, ++p);
-    packet.utf8Write('hostkeys-prove-00@openssh.com', p += 4, 29);
+    packet.utf8Write("hostkeys-prove-00@openssh.com", (p += 4), 29);
 
-    packet[p += 29] = 1; // want reply
+    packet[(p += 29)] = 1; // want reply
 
     ++p;
     for (const buf of publicKeys) {
-      writeUInt32BE(packet, buf.length, p);
-      bufferCopy(buf, packet, 0, buf.length, p += 4);
-      p += buf.length;
+      writeUInt32BE(packet, (buf as any).length, p);
+      bufferCopy(buf, packet, 0, (buf as any).length, (p += 4));
+      p += (buf as any).length;
     }
 
     if (this._debug) {
       this._debug(
-        'Outbound: Sending GLOBAL_REQUEST (hostkeys-prove-00@openssh.com)'
+        "Outbound: Sending GLOBAL_REQUEST (hostkeys-prove-00@openssh.com)"
       );
     }
     sendPacket(this, this._packetRW.write.finalize(packet));
@@ -1480,7 +1559,7 @@ class Protocol {
   // ------
   serviceAccept(svcName) {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
     const svcNameLen = Buffer.byteLength(svcName);
     let p = this._packetRW.write.allocStart;
@@ -1489,12 +1568,12 @@ class Protocol {
     packet[p] = MESSAGE.SERVICE_ACCEPT;
 
     writeUInt32BE(packet, svcNameLen, ++p);
-    packet.utf8Write(svcName, p += 4, svcNameLen);
+    packet.utf8Write(svcName, (p += 4), svcNameLen);
 
     this._debug && this._debug(`Outbound: Sending SERVICE_ACCEPT (${svcName})`);
     sendPacket(this, this._packetRW.write.finalize(packet));
 
-    if (this._server && this._banner && svcName === 'ssh-userauth') {
+    if (this._server && this._banner && svcName === "ssh-userauth") {
       const banner = this._banner;
       this._banner = undefined; // Prevent banner from being displayed again
       const bannerLen = Buffer.byteLength(banner);
@@ -1504,21 +1583,26 @@ class Protocol {
       packet[p] = MESSAGE.USERAUTH_BANNER;
 
       writeUInt32BE(packet, bannerLen, ++p);
-      packet.utf8Write(banner, p += 4, bannerLen);
+      packet.utf8Write(banner, (p += 4), bannerLen);
 
-      writeUInt32BE(packet, 0, p += bannerLen); // Empty language tag
+      writeUInt32BE(packet, 0, (p += bannerLen)); // Empty language tag
 
-      this._debug && this._debug('Outbound: Sending USERAUTH_BANNER');
+      this._debug && this._debug("Outbound: Sending USERAUTH_BANNER");
       sendPacket(this, this._packetRW.write.finalize(packet));
     }
   }
   // 'ssh-connection' service-specific
-  forwardedTcpip(chan, initWindow, maxPacket, cfg) {
+  forwardedTcpip(
+    chan,
+    initWindow,
+    maxPacket,
+    { boundAddr, remoteAddr, boundPort, remotePort }
+  ) {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
-    const boundAddrLen = Buffer.byteLength(cfg.boundAddr);
-    const remoteAddrLen = Buffer.byteLength(cfg.remoteAddr);
+    const boundAddrLen = Buffer.byteLength(boundAddr);
+    const remoteAddrLen = Buffer.byteLength(remoteAddr);
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(
       1 + 4 + 15 + 4 + 4 + 4 + 4 + boundAddrLen + 4 + 4 + remoteAddrLen + 4
@@ -1527,34 +1611,35 @@ class Protocol {
     packet[p] = MESSAGE.CHANNEL_OPEN;
 
     writeUInt32BE(packet, 15, ++p);
-    packet.utf8Write('forwarded-tcpip', p += 4, 15);
+    packet.utf8Write("forwarded-tcpip", (p += 4), 15);
 
-    writeUInt32BE(packet, chan, p += 15);
+    writeUInt32BE(packet, chan, (p += 15));
 
-    writeUInt32BE(packet, initWindow, p += 4);
+    writeUInt32BE(packet, initWindow, (p += 4));
 
-    writeUInt32BE(packet, maxPacket, p += 4);
+    writeUInt32BE(packet, maxPacket, (p += 4));
 
-    writeUInt32BE(packet, boundAddrLen, p += 4);
-    packet.utf8Write(cfg.boundAddr, p += 4, boundAddrLen);
+    writeUInt32BE(packet, boundAddrLen, (p += 4));
+    packet.utf8Write(boundAddr, (p += 4), boundAddrLen);
 
-    writeUInt32BE(packet, cfg.boundPort, p += boundAddrLen);
+    writeUInt32BE(packet, boundPort, (p += boundAddrLen));
 
-    writeUInt32BE(packet, remoteAddrLen, p += 4);
-    packet.utf8Write(cfg.remoteAddr, p += 4, remoteAddrLen);
+    writeUInt32BE(packet, remoteAddrLen, (p += 4));
+    packet.utf8Write(remoteAddr, (p += 4), remoteAddrLen);
 
-    writeUInt32BE(packet, cfg.remotePort, p += remoteAddrLen);
+    writeUInt32BE(packet, remotePort, (p += remoteAddrLen));
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_OPEN (r:${chan}, forwarded-tcpip)`
-    );
+    this._debug &&
+      this._debug(
+        `Outbound: Sending CHANNEL_OPEN (r:${chan}, forwarded-tcpip)`
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
-  x11(chan, initWindow, maxPacket, cfg) {
+  x11(chan, initWindow, maxPacket, { originAddr, originPort }) {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
-    const addrLen = Buffer.byteLength(cfg.originAddr);
+    const addrLen = Buffer.byteLength(originAddr);
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(
       1 + 4 + 3 + 4 + 4 + 4 + 4 + addrLen + 4
@@ -1563,27 +1648,26 @@ class Protocol {
     packet[p] = MESSAGE.CHANNEL_OPEN;
 
     writeUInt32BE(packet, 3, ++p);
-    packet.utf8Write('x11', p += 4, 3);
+    packet.utf8Write("x11", (p += 4), 3);
 
-    writeUInt32BE(packet, chan, p += 3);
+    writeUInt32BE(packet, chan, (p += 3));
 
-    writeUInt32BE(packet, initWindow, p += 4);
+    writeUInt32BE(packet, initWindow, (p += 4));
 
-    writeUInt32BE(packet, maxPacket, p += 4);
+    writeUInt32BE(packet, maxPacket, (p += 4));
 
-    writeUInt32BE(packet, addrLen, p += 4);
-    packet.utf8Write(cfg.originAddr, p += 4, addrLen);
+    writeUInt32BE(packet, addrLen, (p += 4));
+    packet.utf8Write(originAddr, (p += 4), addrLen);
 
-    writeUInt32BE(packet, cfg.originPort, p += addrLen);
+    writeUInt32BE(packet, originPort, (p += addrLen));
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_OPEN (r:${chan}, x11)`
-    );
+    this._debug &&
+      this._debug(`Outbound: Sending CHANNEL_OPEN (r:${chan}, x11)`);
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   openssh_authAgent(chan, initWindow, maxPacket) {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(1 + 4 + 22 + 4 + 4 + 4);
@@ -1591,24 +1675,25 @@ class Protocol {
     packet[p] = MESSAGE.CHANNEL_OPEN;
 
     writeUInt32BE(packet, 22, ++p);
-    packet.utf8Write('auth-agent@openssh.com', p += 4, 22);
+    packet.utf8Write("auth-agent@openssh.com", (p += 4), 22);
 
-    writeUInt32BE(packet, chan, p += 22);
+    writeUInt32BE(packet, chan, (p += 22));
 
-    writeUInt32BE(packet, initWindow, p += 4);
+    writeUInt32BE(packet, initWindow, (p += 4));
 
-    writeUInt32BE(packet, maxPacket, p += 4);
+    writeUInt32BE(packet, maxPacket, (p += 4));
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_OPEN (r:${chan}, auth-agent@openssh.com)`
-    );
+    this._debug &&
+      this._debug(
+        `Outbound: Sending CHANNEL_OPEN (r:${chan}, auth-agent@openssh.com)`
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
-  openssh_forwardedStreamLocal(chan, initWindow, maxPacket, cfg) {
+  openssh_forwardedStreamLocal(chan, initWindow, maxPacket, { socketPath }) {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
-    const pathLen = Buffer.byteLength(cfg.socketPath);
+    const pathLen = Buffer.byteLength(socketPath);
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(
       1 + 4 + 33 + 4 + 4 + 4 + 4 + pathLen + 4
@@ -1617,30 +1702,29 @@ class Protocol {
     packet[p] = MESSAGE.CHANNEL_OPEN;
 
     writeUInt32BE(packet, 33, ++p);
-    packet.utf8Write('forwarded-streamlocal@openssh.com', p += 4, 33);
+    packet.utf8Write("forwarded-streamlocal@openssh.com", (p += 4), 33);
 
-    writeUInt32BE(packet, chan, p += 33);
+    writeUInt32BE(packet, chan, (p += 33));
 
-    writeUInt32BE(packet, initWindow, p += 4);
+    writeUInt32BE(packet, initWindow, (p += 4));
 
-    writeUInt32BE(packet, maxPacket, p += 4);
+    writeUInt32BE(packet, maxPacket, (p += 4));
 
-    writeUInt32BE(packet, pathLen, p += 4);
-    packet.utf8Write(cfg.socketPath, p += 4, pathLen);
+    writeUInt32BE(packet, pathLen, (p += 4));
+    packet.utf8Write(socketPath, (p += 4), pathLen);
 
-    writeUInt32BE(packet, 0, p += pathLen);
+    writeUInt32BE(packet, 0, (p += pathLen));
 
     if (this._debug) {
       this._debug(
-        'Outbound: Sending CHANNEL_OPEN '
-          + `(r:${chan}, forwarded-streamlocal@openssh.com)`
+        `Outbound: Sending CHANNEL_OPEN ${`(r:${chan}, forwarded-streamlocal@openssh.com)`}`
       );
     }
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   exitStatus(chan, status) {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
     // Does not consume window space
     let p = this._packetRW.write.allocStart;
@@ -1650,38 +1734,37 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, 11, p += 4);
-    packet.utf8Write('exit-status', p += 4, 11);
+    writeUInt32BE(packet, 11, (p += 4));
+    packet.utf8Write("exit-status", (p += 4), 11);
 
-    packet[p += 11] = 0;
+    packet[(p += 11)] = 0;
 
     writeUInt32BE(packet, status, ++p);
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_REQUEST (r:${chan}, exit-status: ${status})`
-    );
+    this._debug &&
+      this._debug(
+        `Outbound: Sending CHANNEL_REQUEST (r:${chan}, exit-status: ${status})`
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   exitSignal(chan, name, coreDumped, msg) {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
     // Does not consume window space
 
     const origSignal = name;
 
-    if (typeof origSignal !== 'string' || !origSignal)
+    if (typeof origSignal !== "string" || !origSignal)
       throw new Error(`Invalid signal: ${origSignal}`);
 
     let signal = name.toUpperCase();
-    if (signal.slice(0, 3) === 'SIG')
-      signal = signal.slice(3);
+    if (signal.slice(0, 3) === "SIG") signal = signal.slice(3);
 
-    if (SIGNALS[signal] !== 1)
-      throw new Error(`Invalid signal: ${origSignal}`);
+    if (SIGNALS[signal] !== 1) throw new Error(`Invalid signal: ${origSignal}`);
 
     const nameLen = Buffer.byteLength(signal);
-    const msgLen = (msg ? Buffer.byteLength(msg) : 0);
+    const msgLen = msg ? Buffer.byteLength(msg) : 0;
     let p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(
       1 + 4 + 4 + 11 + 1 + 4 + nameLen + 1 + 4 + msgLen + 4
@@ -1691,15 +1774,15 @@ class Protocol {
 
     writeUInt32BE(packet, chan, ++p);
 
-    writeUInt32BE(packet, 11, p += 4);
-    packet.utf8Write('exit-signal', p += 4, 11);
+    writeUInt32BE(packet, 11, (p += 4));
+    packet.utf8Write("exit-signal", (p += 4), 11);
 
-    packet[p += 11] = 0;
+    packet[(p += 11)] = 0;
 
     writeUInt32BE(packet, nameLen, ++p);
-    packet.utf8Write(signal, p += 4, nameLen);
+    packet.utf8Write(signal, (p += 4), nameLen);
 
-    packet[p += nameLen] = (coreDumped ? 1 : 0);
+    packet[(p += nameLen)] = coreDumped ? 1 : 0;
 
     writeUInt32BE(packet, msgLen, ++p);
 
@@ -1711,22 +1794,22 @@ class Protocol {
 
     writeUInt32BE(packet, 0, p);
 
-    this._debug && this._debug(
-      `Outbound: Sending CHANNEL_REQUEST (r:${chan}, exit-signal: ${name})`
-    );
+    this._debug &&
+      this._debug(
+        `Outbound: Sending CHANNEL_REQUEST (r:${chan}, exit-signal: ${name})`
+      );
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   // 'ssh-userauth' service-specific
   authFailure(authMethods, isPartial) {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
-    if (this._authsQueue.length === 0)
-      throw new Error('No auth in progress');
+    if (this._authsQueue.length === 0) throw new Error("No auth in progress");
 
     let methods;
 
-    if (typeof authMethods === 'boolean') {
+    if (typeof authMethods === "boolean") {
       isPartial = authMethods;
       authMethods = undefined;
     }
@@ -1734,13 +1817,12 @@ class Protocol {
     if (authMethods) {
       methods = [];
       for (let i = 0; i < authMethods.length; ++i) {
-        if (authMethods[i].toLowerCase() === 'none')
-          continue;
+        if (authMethods[i].toLowerCase() === "none") continue;
         methods.push(authMethods[i]);
       }
-      methods = methods.join(',');
+      methods = methods.join(",");
     } else {
-      methods = '';
+      methods = "";
     }
 
     const methodsLen = methods.length;
@@ -1750,21 +1832,20 @@ class Protocol {
     packet[p] = MESSAGE.USERAUTH_FAILURE;
 
     writeUInt32BE(packet, methodsLen, ++p);
-    packet.utf8Write(methods, p += 4, methodsLen);
+    packet.utf8Write(methods, (p += 4), methodsLen);
 
-    packet[p += methodsLen] = (isPartial === true ? 1 : 0);
+    packet[(p += methodsLen)] = isPartial === true ? 1 : 0;
 
     this._authsQueue.shift();
 
-    this._debug && this._debug('Outbound: Sending USERAUTH_FAILURE');
+    this._debug && this._debug("Outbound: Sending USERAUTH_FAILURE");
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   authSuccess() {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
-    if (this._authsQueue.length === 0)
-      throw new Error('No auth in progress');
+    if (this._authsQueue.length === 0) throw new Error("No auth in progress");
 
     const p = this._packetRW.write.allocStart;
     const packet = this._packetRW.write.alloc(1);
@@ -1774,19 +1855,19 @@ class Protocol {
     this._authsQueue.shift();
     this._authenticated = true;
 
-    this._debug && this._debug('Outbound: Sending USERAUTH_SUCCESS');
+    this._debug && this._debug("Outbound: Sending USERAUTH_SUCCESS");
     sendPacket(this, this._packetRW.write.finalize(packet));
 
-    if (this._kex.negotiated.cs.compress === 'zlib@openssh.com')
+    if (this._kex.negotiated.cs.compress === "zlib@openssh.com")
       this._packetRW.read = new ZlibPacketReader();
-    if (this._kex.negotiated.sc.compress === 'zlib@openssh.com')
+    if (this._kex.negotiated.sc.compress === "zlib@openssh.com")
       this._packetRW.write = new ZlibPacketWriter(this);
   }
   authPKOK(keyAlgo, key) {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
-    if (this._authsQueue.length === 0 || this._authsQueue[0] !== 'publickey')
+    if (this._authsQueue.length === 0 || this._authsQueue[0] !== "publickey")
       throw new Error('"publickey" auth not in progress');
 
     // TODO: support parsed key for `key`
@@ -1799,19 +1880,19 @@ class Protocol {
     packet[p] = MESSAGE.USERAUTH_PK_OK;
 
     writeUInt32BE(packet, keyAlgoLen, ++p);
-    packet.utf8Write(keyAlgo, p += 4, keyAlgoLen);
+    packet.utf8Write(keyAlgo, (p += 4), keyAlgoLen);
 
-    writeUInt32BE(packet, keyLen, p += keyAlgoLen);
-    packet.set(key, p += 4);
+    writeUInt32BE(packet, keyLen, (p += keyAlgoLen));
+    packet.set(key, (p += 4));
 
     this._authsQueue.shift();
 
-    this._debug && this._debug('Outbound: Sending USERAUTH_PK_OK');
+    this._debug && this._debug("Outbound: Sending USERAUTH_PK_OK");
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   authPasswdChg(prompt) {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
     const promptLen = Buffer.byteLength(prompt);
     let p = this._packetRW.write.allocStart;
@@ -1820,16 +1901,16 @@ class Protocol {
     packet[p] = MESSAGE.USERAUTH_PASSWD_CHANGEREQ;
 
     writeUInt32BE(packet, promptLen, ++p);
-    packet.utf8Write(prompt, p += 4, promptLen);
+    packet.utf8Write(prompt, (p += 4), promptLen);
 
-    writeUInt32BE(packet, 0, p += promptLen); // Empty language tag
+    writeUInt32BE(packet, 0, (p += promptLen)); // Empty language tag
 
-    this._debug && this._debug('Outbound: Sending USERAUTH_PASSWD_CHANGEREQ');
+    this._debug && this._debug("Outbound: Sending USERAUTH_PASSWD_CHANGEREQ");
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
   authInfoReq(name, instructions, prompts) {
     if (!this._server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
     let promptsLen = 0;
     const nameLen = name ? Buffer.byteLength(name) : 0;
@@ -1861,10 +1942,10 @@ class Protocol {
 
     writeUInt32BE(packet, 0, p);
 
-    writeUInt32BE(packet, prompts.length, p += 4);
+    writeUInt32BE(packet, prompts.length, (p += 4));
     p += 4;
-    for (let i = 0; i < prompts.length; ++i) {
-      const prompt = prompts[i];
+
+    prompts.forEach((prompt) => {
       const promptLen = Buffer.byteLength(prompt.prompt);
 
       writeUInt32BE(packet, promptLen, p);
@@ -1873,10 +1954,10 @@ class Protocol {
         packet.utf8Write(prompt.prompt, p, promptLen);
         p += promptLen;
       }
-      packet[p++] = (prompt.echo ? 1 : 0);
-    }
+      packet[p++] = prompt.echo ? 1 : 0;
+    });
 
-    this._debug && this._debug('Outbound: Sending USERAUTH_INFO_REQUEST');
+    this._debug && this._debug("Outbound: Sending USERAUTH_INFO_REQUEST");
     sendPacket(this, this._packetRW.write.finalize(packet));
   }
 }
@@ -1886,7 +1967,7 @@ const RE_IDENT = /^SSH-(2\.0|1\.99)-([^ ]+)(?: (.*))?$/;
 
 // TODO: optimize this by starting n bytes from the end of this._buffer instead
 // of the beginning
-function parseHeader(chunk, p, len) {
+function parseHeader(this: any, chunk, p, len) {
   let data;
   let chunkOffset;
   if (this._buffer) {
@@ -1895,10 +1976,10 @@ function parseHeader(chunk, p, len) {
     if (p === 0) {
       data.set(chunk, this._buffer.length);
     } else {
-      data.set(new Uint8Array(chunk.buffer,
-                              chunk.byteOffset + p,
-                              (len - p)),
-               this._buffer.length);
+      data.set(
+        new Uint8Array(chunk.buffer, chunk.byteOffset + p, len - p),
+        this._buffer.length
+      );
     }
     chunkOffset = this._buffer.length;
     p = 0;
@@ -1921,27 +2002,27 @@ function parseHeader(chunk, p, len) {
     }
 
     if (ch === 10 /* '\n' */) {
-      if (end > start
-          && end - start > 4
-          && data[start] === 83 /* 'S' */
-          && data[start + 1] === 83 /* 'S' */
-          && data[start + 2] === 72 /* 'H' */
-          && data[start + 3] === 45 /* '-' */) {
-
+      if (
+        end > start &&
+        end - start > 4 &&
+        data[start] === 83 /* 'S' */ &&
+        data[start + 1] === 83 /* 'S' */ &&
+        data[start + 2] === 72 /* 'H' */ &&
+        data[start + 3] === 45 /* '-' */
+      ) {
         const full = data.latin1Slice(op, end + 1);
-        const identRaw = (start === op ? full : full.slice(start - op));
+        const identRaw = start === op ? full : full.slice(start - op);
         const m = RE_IDENT.exec(identRaw);
-        if (!m)
-          throw new Error('Invalid identification string');
+        if (!m) throw new Error("Invalid identification string");
 
         const header = {
-          greeting: (start === op ? '' : full.slice(0, start - op)),
+          greeting: start === op ? "" : full.slice(0, start - op),
           identRaw,
           versions: {
             protocol: m[1],
             software: m[2],
           },
-          comments: m[3]
+          comments: m[3],
         };
 
         // Needed during handshake
@@ -1951,8 +2032,10 @@ function parseHeader(chunk, p, len) {
         this._compatFlags = getCompatFlags(header);
 
         this._buffer = undefined;
-        this._decipher =
-          new NullDecipher(0, onKEXPayload.bind(this, { firstPacket: true }));
+        this._decipher = new NullDecipher(
+          0,
+          onKEXPayload.bind(this, { firstPacket: true })
+        );
         this._parse = parsePacket;
 
         this._onHeader(header);
@@ -1967,53 +2050,52 @@ function parseHeader(chunk, p, len) {
       }
 
       // Only allow pre-ident greetings when we're a client
-      if (this._server)
-        throw new Error('Greetings from clients not permitted');
+      if (this._server) throw new Error("Greetings from clients not permitted");
 
-      if (++lines > MAX_LINES)
-        throw new Error('Max greeting lines exceeded');
+      if (++lines > MAX_LINES) throw new Error("Max greeting lines exceeded");
 
       needNL = false;
       start = p + 1;
       lineLen = 0;
     } else if (needNL) {
-      throw new Error('Invalid header: expected newline');
+      throw new Error("Invalid header: expected newline");
     } else if (++lineLen >= MAX_LINE_LEN) {
-      throw new Error('Header line too long');
+      throw new Error("Header line too long");
     }
 
     end = p;
   }
-  if (!this._buffer)
-    this._buffer = bufferSlice(data, op);
+  if (!this._buffer) this._buffer = bufferSlice(data, op);
 
   return p - chunkOffset;
 }
 
-function parsePacket(chunk, p, len) {
+function parsePacket(this: any, chunk, p, len) {
   return this._decipher.decrypt(chunk, p, len);
 }
 
-function onPayload(payload) {
+function onPayload(this: any, payload) {
   // XXX: move this to the Decipher implementations?
 
   this._onPacket();
 
   if (payload.length === 0) {
-    this._debug && this._debug('Inbound: Skipping empty packet payload');
+    this._debug && this._debug("Inbound: Skipping empty packet payload");
     return;
   }
 
   payload = this._packetRW.read.read(payload);
 
   const type = payload[0];
-  if (type === MESSAGE.USERAUTH_SUCCESS
-      && !this._server
-      && !this._authenticated) {
+  if (
+    type === MESSAGE.USERAUTH_SUCCESS &&
+    !this._server &&
+    !this._authenticated
+  ) {
     this._authenticated = true;
-    if (this._kex.negotiated.cs.compress === 'zlib@openssh.com')
+    if (this._kex.negotiated.cs.compress === "zlib@openssh.com")
       this._packetRW.write = new ZlibPacketWriter(this);
-    if (this._kex.negotiated.sc.compress === 'zlib@openssh.com')
+    if (this._kex.negotiated.sc.compress === "zlib@openssh.com")
       this._packetRW.read = new ZlibPacketReader();
   }
   const handler = MESSAGE_HANDLERS[type];
@@ -2025,15 +2107,14 @@ function onPayload(payload) {
   return handler(this, payload);
 }
 
-function getCompatFlags(header) {
-  const software = header.versions.software;
+function getCompatFlags({ versions }) {
+  const software = versions.software;
 
-  let flags = 0;
+  let flags: number = 0;
 
   for (const rule of COMPAT_CHECKS) {
-    if (typeof rule[0] === 'string') {
-      if (software === rule[0])
-        flags |= rule[1];
+    if (typeof rule[0] === "string") {
+      if (software === rule[0]) flags |= rule[1];
     } else if (rule[0].test(software)) {
       flags |= rule[1];
     }
@@ -2044,20 +2125,17 @@ function getCompatFlags(header) {
 
 function modesToBytes(modes) {
   const keys = Object.keys(modes);
-  const bytes = Buffer.allocUnsafe((5 * keys.length) + 1);
+  const bytes = Buffer.allocUnsafe(5 * keys.length + 1);
   let b = 0;
 
-  for (let i = 0; i < keys.length; ++i) {
-    const key = keys[i];
-    if (key === 'TTY_OP_END')
-      continue;
+  for (const key of keys) {
+    if (key === "TTY_OP_END") continue;
 
     const opcode = TERMINAL_MODE[key];
-    if (opcode === undefined)
-      continue;
+    if (opcode === undefined) continue;
 
     const val = modes[key];
-    if (typeof val === 'number' && isFinite(val)) {
+    if (typeof val === "number" && isFinite(val)) {
       bytes[b++] = opcode;
       bytes[b++] = val >>> 24;
       bytes[b++] = val >>> 16;
@@ -2068,10 +2146,9 @@ function modesToBytes(modes) {
 
   bytes[b++] = TERMINAL_MODE.TTY_OP_END;
 
-  if (b < bytes.length)
-    return bufferSlice(bytes, 0, b);
+  if (b < bytes.length) return bufferSlice(bytes, 0, b);
 
   return bytes;
 }
 
-module.exports = Protocol;
+export default Protocol;

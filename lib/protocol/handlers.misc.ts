@@ -1,29 +1,24 @@
-'use strict';
-
-const {
+import {
   bufferSlice,
   bufferParser,
   doFatalError,
   sigSSHToASN1,
   writeUInt32BE,
-} = require('./utils.js');
-
-const {
+} from "./utils";
+import {
   CHANNEL_OPEN_FAILURE,
   COMPAT,
   MESSAGE,
   TERMINAL_MODE,
-} = require('./constants.js');
+} from "./constants";
+import { parseKey } from "./keyParser";
 
-const {
-  parseKey,
-} = require('./keyParser.js');
+const TERMINAL_MODE_BY_VALUE = Array.from(Object.entries(TERMINAL_MODE)).reduce(
+  (obj, [key, value]) => ({ ...obj, [key]: value }),
+  {}
+);
 
-const TERMINAL_MODE_BY_VALUE =
-  Array.from(Object.entries(TERMINAL_MODE))
-       .reduce((obj, [key, value]) => ({ ...obj, [key]: value }), {});
-
-module.exports = {
+export const MISC_HANDLERS = {
   // Transport layer protocol ==================================================
   [MESSAGE.DISCONNECT]: (self, payload) => {
     /*
@@ -39,15 +34,11 @@ module.exports = {
     bufferParser.clear();
 
     if (lang === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed DISCONNECT packet'
-      );
+      return doFatalError(self, "Inbound: Malformed DISCONNECT packet");
     }
 
-    self._debug && self._debug(
-      `Inbound: Received DISCONNECT (${reason}, "${desc}")`
-    );
+    self._debug &&
+      self._debug(`Inbound: Received DISCONNECT (${reason}, "${desc}")`);
 
     const handler = self._handlers.DISCONNECT;
     handler && handler(self, reason, desc);
@@ -57,7 +48,7 @@ module.exports = {
       byte      SSH_MSG_IGNORE
       string    data
     */
-    self._debug && self._debug('Inbound: Received IGNORE');
+    self._debug && self._debug("Inbound: Received IGNORE");
   },
   [MESSAGE.UNIMPLEMENTED]: (self, payload) => {
     /*
@@ -69,14 +60,11 @@ module.exports = {
     bufferParser.clear();
 
     if (seqno === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed UNIMPLEMENTED packet'
-      );
+      return doFatalError(self, "Inbound: Malformed UNIMPLEMENTED packet");
     }
 
-    self._debug
-      && self._debug(`Inbound: Received UNIMPLEMENTED (seqno ${seqno})`);
+    self._debug &&
+      self._debug(`Inbound: Received UNIMPLEMENTED (seqno ${seqno})`);
   },
   [MESSAGE.DEBUG]: (self, payload) => {
     /*
@@ -92,13 +80,10 @@ module.exports = {
     bufferParser.clear();
 
     if (lang === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed DEBUG packet'
-      );
+      return doFatalError(self, "Inbound: Malformed DEBUG packet");
     }
 
-    self._debug && self._debug('Inbound: Received DEBUG');
+    self._debug && self._debug("Inbound: Received DEBUG");
 
     const handler = self._handlers.DEBUG;
     handler && handler(self, display, msg);
@@ -113,10 +98,7 @@ module.exports = {
     bufferParser.clear();
 
     if (name === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed SERVICE_REQUEST packet'
-      );
+      return doFatalError(self, "Inbound: Malformed SERVICE_REQUEST packet");
     }
 
     self._debug && self._debug(`Inbound: Received SERVICE_REQUEST (${name})`);
@@ -135,10 +117,7 @@ module.exports = {
     bufferParser.clear();
 
     if (name === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed SERVICE_ACCEPT packet'
-      );
+      return doFatalError(self, "Inbound: Malformed SERVICE_ACCEPT packet");
     }
 
     self._debug && self._debug(`Inbound: Received SERVICE_ACCEPT (${name})`);
@@ -163,10 +142,10 @@ module.exports = {
     let methodData;
     let methodDesc;
     switch (method) {
-      case 'none':
+      case "none":
         methodData = null;
         break;
-      case 'password': {
+      case "password": {
         /*
           boolean   <new password follows (old) plaintext password?>
           string    plaintext password in ISO-10646 UTF-8 encoding [RFC3629]
@@ -179,13 +158,12 @@ module.exports = {
             const newPassword = bufferParser.readString(true);
             if (newPassword !== undefined)
               methodData = { oldPassword: methodData, newPassword };
-            else
-              methodData = undefined;
+            else methodData = undefined;
           }
         }
         break;
       }
-      case 'publickey': {
+      case "publickey": {
         /*
           boolean   <signature follows public key blob?>
           string    public key algorithm name
@@ -200,8 +178,10 @@ module.exports = {
             const blobEnd = bufferParser.pos();
             let signature = bufferParser.readString();
             if (signature !== undefined) {
-              if (signature.length > (4 + keyAlgo.length + 4)
-                  && signature.utf8Slice(4, 4 + keyAlgo.length) === keyAlgo) {
+              if (
+                signature.length > 4 + keyAlgo.length + 4 &&
+                signature.utf8Slice(4, 4 + keyAlgo.length) === keyAlgo
+              ) {
                 // Skip algoLen + algo + sigLen
                 signature = bufferSlice(signature, 4 + keyAlgo.length + 4);
               }
@@ -226,12 +206,12 @@ module.exports = {
             }
           } else {
             methodData = { keyAlgo, key };
-            methodDesc = 'publickey -- check';
+            methodDesc = "publickey -- check";
           }
         }
         break;
       }
-      case 'hostbased': {
+      case "hostbased": {
         /*
           string    public key algorithm for host key
           string    public host key and certificates for client host
@@ -248,8 +228,10 @@ module.exports = {
         const blobEnd = bufferParser.pos();
         let signature = bufferParser.readString();
         if (signature !== undefined) {
-          if (signature.length > (4 + keyAlgo.length + 4)
-              && signature.utf8Slice(4, 4 + keyAlgo.length) === keyAlgo) {
+          if (
+            signature.length > 4 + keyAlgo.length + 4 &&
+            signature.utf8Slice(4, 4 + keyAlgo.length) === keyAlgo
+          ) {
             // Skip algoLen + algo + sigLen
             signature = bufferSlice(signature, 4 + keyAlgo.length + 4);
           }
@@ -276,7 +258,7 @@ module.exports = {
         }
         break;
       }
-      case 'keyboard-interactive':
+      case "keyboard-interactive":
         /*
           string    language tag (as defined in [RFC-3066])
           string    submethods (ISO-10646 UTF-8)
@@ -287,25 +269,20 @@ module.exports = {
         methodData = bufferParser.readList();
         break;
       default:
-        if (method !== undefined)
-          methodData = bufferParser.readRaw();
+        if (method !== undefined) methodData = bufferParser.readRaw();
     }
     bufferParser.clear();
 
     if (methodData === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed USERAUTH_REQUEST packet'
-      );
+      return doFatalError(self, "Inbound: Malformed USERAUTH_REQUEST packet");
     }
 
-    if (methodDesc === undefined)
-      methodDesc = method;
+    if (methodDesc === undefined) methodDesc = method;
 
     self._authsQueue.push(method);
 
-    self._debug
-      && self._debug(`Inbound: Received USERAUTH_REQUEST (${methodDesc})`);
+    self._debug &&
+      self._debug(`Inbound: Received USERAUTH_REQUEST (${methodDesc})`);
 
     const handler = self._handlers.USERAUTH_REQUEST;
     handler && handler(self, user, service, method, methodData);
@@ -323,14 +300,11 @@ module.exports = {
     bufferParser.clear();
 
     if (partialSuccess === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed USERAUTH_FAILURE packet'
-      );
+      return doFatalError(self, "Inbound: Malformed USERAUTH_FAILURE packet");
     }
 
-    self._debug
-      && self._debug(`Inbound: Received USERAUTH_FAILURE (${authMethods})`);
+    self._debug &&
+      self._debug(`Inbound: Received USERAUTH_FAILURE (${authMethods})`);
 
     self._authsQueue.shift();
     const handler = self._handlers.USERAUTH_FAILURE;
@@ -341,7 +315,7 @@ module.exports = {
     /*
       byte      SSH_MSG_USERAUTH_SUCCESS
     */
-    self._debug && self._debug('Inbound: Received USERAUTH_SUCCESS');
+    self._debug && self._debug("Inbound: Received USERAUTH_SUCCESS");
 
     self._authsQueue.shift();
     const handler = self._handlers.USERAUTH_SUCCESS;
@@ -360,13 +334,10 @@ module.exports = {
     bufferParser.clear();
 
     if (lang === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed USERAUTH_BANNER packet'
-      );
+      return doFatalError(self, "Inbound: Malformed USERAUTH_BANNER packet");
     }
 
-    self._debug && self._debug('Inbound: Received USERAUTH_BANNER');
+    self._debug && self._debug("Inbound: Received USERAUTH_BANNER");
 
     const handler = self._handlers.USERAUTH_BANNER;
     handler && handler(self, msg);
@@ -375,13 +346,13 @@ module.exports = {
   // User auth protocol -- method-specific =====================================
   60: (self, payload) => {
     if (!self._authsQueue.length) {
-      self._debug
-        && self._debug('Inbound: Received payload type 60 without auth');
+      self._debug &&
+        self._debug("Inbound: Received payload type 60 without auth");
       return;
     }
 
     switch (self._authsQueue[0]) {
-      case 'password': {
+      case "password": {
         // S->C
         /*
           byte      SSH_MSG_USERAUTH_PASSWD_CHANGEREQ
@@ -396,18 +367,18 @@ module.exports = {
         if (lang === undefined) {
           return doFatalError(
             self,
-            'Inbound: Malformed USERAUTH_PASSWD_CHANGEREQ packet'
+            "Inbound: Malformed USERAUTH_PASSWD_CHANGEREQ packet"
           );
         }
 
-        self._debug
-          && self._debug('Inbound: Received USERAUTH_PASSWD_CHANGEREQ');
+        self._debug &&
+          self._debug("Inbound: Received USERAUTH_PASSWD_CHANGEREQ");
 
         const handler = self._handlers.USERAUTH_PASSWD_CHANGEREQ;
         handler && handler(self, prompt);
         break;
       }
-      case 'publickey': {
+      case "publickey": {
         // S->C
         /*
           byte      SSH_MSG_USERAUTH_PK_OK
@@ -420,20 +391,17 @@ module.exports = {
         bufferParser.clear();
 
         if (key === undefined) {
-          return doFatalError(
-            self,
-            'Inbound: Malformed USERAUTH_PK_OK packet'
-          );
+          return doFatalError(self, "Inbound: Malformed USERAUTH_PK_OK packet");
         }
 
-        self._debug && self._debug('Inbound: Received USERAUTH_PK_OK');
+        self._debug && self._debug("Inbound: Received USERAUTH_PK_OK");
 
         self._authsQueue.shift();
         const handler = self._handlers.USERAUTH_PK_OK;
         handler && handler(self, keyAlgo, key);
         break;
       }
-      case 'keyboard-interactive': {
+      case "keyboard-interactive": {
         // S->C
         /*
           byte      SSH_MSG_USERAUTH_INFO_REQUEST
@@ -459,37 +427,35 @@ module.exports = {
           for (i = 0; i < numPrompts; ++i) {
             const prompt = bufferParser.readString(true);
             const echo = bufferParser.readBool();
-            if (echo === undefined)
-              break;
+            if (echo === undefined) break;
             prompts[i] = { prompt, echo };
           }
-          if (i !== numPrompts)
-            prompts = undefined;
+          if (i !== numPrompts) prompts = undefined;
         }
         bufferParser.clear();
 
         if (prompts === undefined) {
           return doFatalError(
             self,
-            'Inbound: Malformed USERAUTH_INFO_REQUEST packet'
+            "Inbound: Malformed USERAUTH_INFO_REQUEST packet"
           );
         }
 
-        self._debug && self._debug('Inbound: Received USERAUTH_INFO_REQUEST');
+        self._debug && self._debug("Inbound: Received USERAUTH_INFO_REQUEST");
 
         const handler = self._handlers.USERAUTH_INFO_REQUEST;
         handler && handler(self, name, instructions, prompts);
         break;
       }
       default:
-        self._debug
-          && self._debug('Inbound: Received unexpected payload type 60');
+        self._debug &&
+          self._debug("Inbound: Received unexpected payload type 60");
     }
   },
   61: (self, payload) => {
     if (!self._authsQueue.length) {
-      self._debug
-        && self._debug('Inbound: Received payload type 61 without auth');
+      self._debug &&
+        self._debug("Inbound: Received payload type 61 without auth");
       return;
     }
     /*
@@ -499,11 +465,8 @@ module.exports = {
       ...
       string    response[num-responses] (ISO-10646 UTF-8)
     */
-    if (self._authsQueue[0] !== 'keyboard-interactive') {
-      return doFatalError(
-        self,
-        'Inbound: Received unexpected payload type 61'
-      );
+    if (self._authsQueue[0] !== "keyboard-interactive") {
+      return doFatalError(self, "Inbound: Received unexpected payload type 61");
     }
     bufferParser.init(payload, 1);
     const numResponses = bufferParser.readUInt32BE();
@@ -513,23 +476,21 @@ module.exports = {
       let i;
       for (i = 0; i < numResponses; ++i) {
         const response = bufferParser.readString(true);
-        if (response === undefined)
-          break;
+        if (response === undefined) break;
         responses[i] = response;
       }
-      if (i !== numResponses)
-        responses = undefined;
+      if (i !== numResponses) responses = undefined;
     }
     bufferParser.clear();
 
     if (responses === undefined) {
       return doFatalError(
         self,
-        'Inbound: Malformed USERAUTH_INFO_RESPONSE packet'
+        "Inbound: Malformed USERAUTH_INFO_RESPONSE packet"
       );
     }
 
-    self._debug && self._debug('Inbound: Received USERAUTH_INFO_RESPONSE');
+    self._debug && self._debug("Inbound: Received USERAUTH_INFO_RESPONSE");
 
     const handler = self._handlers.USERAUTH_INFO_RESPONSE;
     handler && handler(self, responses);
@@ -549,32 +510,30 @@ module.exports = {
     let data;
     if (wantReply !== undefined) {
       switch (name) {
-        case 'tcpip-forward':
-        case 'cancel-tcpip-forward': {
+        case "tcpip-forward":
+        case "cancel-tcpip-forward": {
           /*
             string    address to bind (e.g., "0.0.0.0")
             uint32    port number to bind
           */
           const bindAddr = bufferParser.readString(true);
           const bindPort = bufferParser.readUInt32BE();
-          if (bindPort !== undefined)
-            data = { bindAddr, bindPort };
+          if (bindPort !== undefined) data = { bindAddr, bindPort };
           break;
         }
-        case 'streamlocal-forward@openssh.com':
-        case 'cancel-streamlocal-forward@openssh.com': {
+        case "streamlocal-forward@openssh.com":
+        case "cancel-streamlocal-forward@openssh.com": {
           /*
             string    socket path
           */
           const socketPath = bufferParser.readString(true);
-          if (socketPath !== undefined)
-            data = { socketPath };
+          if (socketPath !== undefined) data = { socketPath };
           break;
         }
-        case 'no-more-sessions@openssh.com':
+        case "no-more-sessions@openssh.com":
           data = null;
           break;
-        case 'hostkeys-00@openssh.com': {
+        case "hostkeys-00@openssh.com": {
           data = [];
           while (bufferParser.avail() > 0) {
             const keyRaw = bufferParser.readString();
@@ -583,8 +542,7 @@ module.exports = {
               break;
             }
             const key = parseKey(keyRaw);
-            if (!(key instanceof Error))
-              data.push(key);
+            if (!(key instanceof Error)) data.push(key);
           }
           break;
         }
@@ -595,28 +553,23 @@ module.exports = {
     bufferParser.clear();
 
     if (data === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed GLOBAL_REQUEST packet'
-      );
+      return doFatalError(self, "Inbound: Malformed GLOBAL_REQUEST packet");
     }
 
     self._debug && self._debug(`Inbound: GLOBAL_REQUEST (${name})`);
 
     const handler = self._handlers.GLOBAL_REQUEST;
-    if (handler)
-      handler(self, name, wantReply, data);
-    else
-      self.requestFailure(); // Auto reject
+    if (handler) handler(self, name, wantReply, data);
+    else self.requestFailure(); // Auto reject
   },
   [MESSAGE.REQUEST_SUCCESS]: (self, payload) => {
     /*
       byte      SSH_MSG_REQUEST_SUCCESS
       ....     response specific data
     */
-    const data = (payload.length > 1 ? bufferSlice(payload, 1) : null);
+    const data = payload.length > 1 ? bufferSlice(payload, 1) : null;
 
-    self._debug && self._debug('Inbound: REQUEST_SUCCESS');
+    self._debug && self._debug("Inbound: REQUEST_SUCCESS");
 
     const handler = self._handlers.REQUEST_SUCCESS;
     handler && handler(self, data);
@@ -625,7 +578,7 @@ module.exports = {
     /*
       byte      SSH_MSG_REQUEST_FAILURE
     */
-    self._debug && self._debug('Inbound: Received REQUEST_FAILURE');
+    self._debug && self._debug("Inbound: Received REQUEST_FAILURE");
 
     const handler = self._handlers.REQUEST_FAILURE;
     handler && handler(self);
@@ -649,8 +602,9 @@ module.exports = {
     let channelInfo;
 
     switch (type) {
-      case 'forwarded-tcpip': // S->C
-      case 'direct-tcpip': { // C->S
+      case "forwarded-tcpip": // S->C
+      case "direct-tcpip": {
+        // C->S
         /*
           string    address that was connected / host to connect
           uint32    port that was connected / port to connect
@@ -667,13 +621,14 @@ module.exports = {
             sender,
             window,
             packetSize,
-            data: { destIP, destPort, srcIP, srcPort }
+            data: { destIP, destPort, srcIP, srcPort },
           };
         }
         break;
       }
-      case 'forwarded-streamlocal@openssh.com': // S->C
-      case 'direct-streamlocal@openssh.com': { // C->S
+      case "forwarded-streamlocal@openssh.com": // S->C
+      case "direct-streamlocal@openssh.com": {
+        // C->S
         /*
           string    socket path
           string    reserved for future use
@@ -688,12 +643,13 @@ module.exports = {
             sender,
             window,
             packetSize,
-            data: { socketPath }
+            data: { socketPath },
           };
         }
         break;
       }
-      case 'x11': { // S->C
+      case "x11": {
+        // S->C
         /*
           string    originator address (e.g., "192.168.7.38")
           uint32    originator port
@@ -706,7 +662,7 @@ module.exports = {
             sender,
             window,
             packetSize,
-            data: { srcIP, srcPort }
+            data: { srcIP, srcPort },
           };
         }
         break;
@@ -720,16 +676,13 @@ module.exports = {
           sender,
           window,
           packetSize,
-          data: {}
+          data: {},
         };
     }
     bufferParser.clear();
 
     if (channelInfo === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed CHANNEL_OPEN packet'
-      );
+      return doFatalError(self, "Inbound: Malformed CHANNEL_OPEN packet");
     }
 
     self._debug && self._debug(`Inbound: CHANNEL_OPEN (s:${sender}, ${type})`);
@@ -741,8 +694,8 @@ module.exports = {
       self.channelOpenFail(
         channelInfo.sender,
         CHANNEL_OPEN_FAILURE.ADMINISTRATIVELY_PROHIBITED,
-        '',
-        ''
+        "",
+        ""
       );
     }
   },
@@ -763,23 +716,23 @@ module.exports = {
     const sender = bufferParser.readUInt32BE();
     const window = bufferParser.readUInt32BE();
     const packetSize = bufferParser.readUInt32BE();
-    const data = (bufferParser.avail() ? bufferParser.readRaw() : undefined);
+    const data = bufferParser.avail() ? bufferParser.readRaw() : undefined;
     bufferParser.clear();
 
     if (packetSize === undefined) {
       return doFatalError(
         self,
-        'Inbound: Malformed CHANNEL_OPEN_CONFIRMATION packet'
+        "Inbound: Malformed CHANNEL_OPEN_CONFIRMATION packet"
       );
     }
 
-    self._debug && self._debug(
-      `Inbound: CHANNEL_OPEN_CONFIRMATION (r:${recipient}, s:${sender})`
-    );
+    self._debug &&
+      self._debug(
+        `Inbound: CHANNEL_OPEN_CONFIRMATION (r:${recipient}, s:${sender})`
+      );
 
     const handler = self._handlers.CHANNEL_OPEN_CONFIRMATION;
-    if (handler)
-      handler(self, { recipient, sender, window, packetSize, data });
+    if (handler) handler(self, { recipient, sender, window, packetSize, data });
   },
   [MESSAGE.CHANNEL_OPEN_FAILURE]: (self, payload) => {
     /*
@@ -799,12 +752,12 @@ module.exports = {
     if (lang === undefined) {
       return doFatalError(
         self,
-        'Inbound: Malformed CHANNEL_OPEN_FAILURE packet'
+        "Inbound: Malformed CHANNEL_OPEN_FAILURE packet"
       );
     }
 
-    self._debug
-      && self._debug(`Inbound: CHANNEL_OPEN_FAILURE (r:${recipient})`);
+    self._debug &&
+      self._debug(`Inbound: CHANNEL_OPEN_FAILURE (r:${recipient})`);
 
     const handler = self._handlers.CHANNEL_OPEN_FAILURE;
     handler && handler(self, recipient, reason, description);
@@ -823,13 +776,14 @@ module.exports = {
     if (bytesToAdd === undefined) {
       return doFatalError(
         self,
-        'Inbound: Malformed CHANNEL_WINDOW_ADJUST packet'
+        "Inbound: Malformed CHANNEL_WINDOW_ADJUST packet"
       );
     }
 
-    self._debug && self._debug(
-      `Inbound: CHANNEL_WINDOW_ADJUST (r:${recipient}, ${bytesToAdd})`
-    );
+    self._debug &&
+      self._debug(
+        `Inbound: CHANNEL_WINDOW_ADJUST (r:${recipient}, ${bytesToAdd})`
+      );
 
     const handler = self._handlers.CHANNEL_WINDOW_ADJUST;
     handler && handler(self, recipient, bytesToAdd);
@@ -846,14 +800,11 @@ module.exports = {
     bufferParser.clear();
 
     if (data === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed CHANNEL_DATA packet'
-      );
+      return doFatalError(self, "Inbound: Malformed CHANNEL_DATA packet");
     }
 
-    self._debug
-      && self._debug(`Inbound: CHANNEL_DATA (r:${recipient}, ${data.length})`);
+    self._debug &&
+      self._debug(`Inbound: CHANNEL_DATA (r:${recipient}, ${data.length})`);
 
     const handler = self._handlers.CHANNEL_DATA;
     handler && handler(self, recipient, data);
@@ -874,13 +825,14 @@ module.exports = {
     if (data === undefined) {
       return doFatalError(
         self,
-        'Inbound: Malformed CHANNEL_EXTENDED_DATA packet'
+        "Inbound: Malformed CHANNEL_EXTENDED_DATA packet"
       );
     }
 
-    self._debug && self._debug(
-      `Inbound: CHANNEL_EXTENDED_DATA (r:${recipient}, ${data.length})`
-    );
+    self._debug &&
+      self._debug(
+        `Inbound: CHANNEL_EXTENDED_DATA (r:${recipient}, ${data.length})`
+      );
 
     const handler = self._handlers.CHANNEL_EXTENDED_DATA;
     handler && handler(self, recipient, data, type);
@@ -895,10 +847,7 @@ module.exports = {
     bufferParser.clear();
 
     if (recipient === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed CHANNEL_EOF packet'
-      );
+      return doFatalError(self, "Inbound: Malformed CHANNEL_EOF packet");
     }
 
     self._debug && self._debug(`Inbound: CHANNEL_EOF (r:${recipient})`);
@@ -916,10 +865,7 @@ module.exports = {
     bufferParser.clear();
 
     if (recipient === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed CHANNEL_CLOSE packet'
-      );
+      return doFatalError(self, "Inbound: Malformed CHANNEL_CLOSE packet");
     }
 
     self._debug && self._debug(`Inbound: CHANNEL_CLOSE (r:${recipient})`);
@@ -942,16 +888,18 @@ module.exports = {
     let data;
     if (wantReply !== undefined) {
       switch (type) {
-        case 'exit-status': // S->C
+        case "exit-status": // S->C
           /*
             uint32    exit_status
           */
           data = bufferParser.readUInt32BE();
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${data})`
-          );
+          self._debug &&
+            self._debug(
+              `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${data})`
+            );
           break;
-        case 'exit-signal': { // S->C
+        case "exit-signal": {
+          // S->C
           /*
             string    signal name (without the "SIG" prefix)
             boolean   core dumped
@@ -968,25 +916,25 @@ module.exports = {
             const num = bufferParser.readUInt32BE();
             switch (num) {
               case 1:
-                signal = 'HUP';
+                signal = "HUP";
                 break;
               case 2:
-                signal = 'INT';
+                signal = "INT";
                 break;
               case 3:
-                signal = 'QUIT';
+                signal = "QUIT";
                 break;
               case 6:
-                signal = 'ABRT';
+                signal = "ABRT";
                 break;
               case 9:
-                signal = 'KILL';
+                signal = "KILL";
                 break;
               case 14:
-                signal = 'ALRM';
+                signal = "ALRM";
                 break;
               case 15:
-                signal = 'TERM';
+                signal = "TERM";
                 break;
               default:
                 if (num !== undefined) {
@@ -998,18 +946,19 @@ module.exports = {
           } else {
             signal = bufferParser.readString(true);
             coreDumped = bufferParser.readBool();
-            if (coreDumped === undefined)
-              signal = undefined;
+            if (coreDumped === undefined) signal = undefined;
           }
           const errorMessage = bufferParser.readString(true);
           if (bufferParser.skipString() !== undefined)
             data = { signal, coreDumped, errorMessage };
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${signal})`
-          );
+          self._debug &&
+            self._debug(
+              `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${signal})`
+            );
           break;
         }
-        case 'pty-req': { // C->S
+        case "pty-req": {
+          // C->S
           /*
             string    TERM environment variable value (e.g., vt100)
             uint32    terminal width, characters (e.g., 80)
@@ -1029,13 +978,15 @@ module.exports = {
             let modes = {};
             while (bufferParser.avail()) {
               const opcode = bufferParser.readByte();
-              if (opcode === TERMINAL_MODE.TTY_OP_END)
-                break;
+              if (opcode === TERMINAL_MODE.TTY_OP_END) break;
               const name = TERMINAL_MODE_BY_VALUE[opcode];
               const value = bufferParser.readUInt32BE();
-              if (opcode === undefined
-                  || name === undefined
-                  || value === undefined) {
+              if (
+                opcode === undefined ||
+                name === undefined ||
+                value === undefined
+              ) {
+                // @ts-expect-error TS(2322): Type 'undefined' is not assignable to type '{}'.
                 modes = undefined;
                 break;
               }
@@ -1044,12 +995,12 @@ module.exports = {
             if (modes !== undefined)
               data = { term, cols, rows, width, height, modes };
           }
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`
-          );
+          self._debug &&
+            self._debug(`Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`);
           break;
         }
-        case 'window-change': { // C->S
+        case "window-change": {
+          // C->S
           /*
             uint32    terminal width, columns
             uint32    terminal height, rows
@@ -1060,14 +1011,13 @@ module.exports = {
           const rows = bufferParser.readUInt32BE();
           const width = bufferParser.readUInt32BE();
           const height = bufferParser.readUInt32BE();
-          if (height !== undefined)
-            data = { cols, rows, width, height };
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`
-          );
+          if (height !== undefined) data = { cols, rows, width, height };
+          self._debug &&
+            self._debug(`Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`);
           break;
         }
-        case 'x11-req': { // C->S
+        case "x11-req": {
+          // C->S
           /*
             boolean   single connection
             string    x11 authentication protocol
@@ -1078,92 +1028,88 @@ module.exports = {
           const protocol = bufferParser.readString(true);
           const cookie = bufferParser.readString();
           const screen = bufferParser.readUInt32BE();
-          if (screen !== undefined)
-            data = { single, protocol, cookie, screen };
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`
-          );
+          if (screen !== undefined) data = { single, protocol, cookie, screen };
+          self._debug &&
+            self._debug(`Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`);
           break;
         }
-        case 'env': { // C->S
+        case "env": {
+          // C->S
           /*
             string    variable name
             string    variable value
           */
           const name = bufferParser.readString(true);
           const value = bufferParser.readString(true);
-          if (value !== undefined)
-            data = { name, value };
+          if (value !== undefined) data = { name, value };
           if (self._debug) {
             self._debug(
-              `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: `
-                + `${name}=${value})`
+              `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ` +
+                `${name}=${value})`
             );
           }
           break;
         }
-        case 'shell': // C->S
+        case "shell": // C->S
           data = null; // No extra data
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`
-          );
+          self._debug &&
+            self._debug(`Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`);
           break;
-        case 'exec': // C->S
+        case "exec": // C->S
           /*
             string    command
           */
           data = bufferParser.readString(true);
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${data})`
-          );
+          self._debug &&
+            self._debug(
+              `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${data})`
+            );
           break;
-        case 'subsystem': // C->S
+        case "subsystem": // C->S
           /*
             string    subsystem name
           */
           data = bufferParser.readString(true);
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${data})`
-          );
+          self._debug &&
+            self._debug(
+              `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${data})`
+            );
           break;
-        case 'signal': // C->S
+        case "signal": // C->S
           /*
             string    signal name (without the "SIG" prefix)
           */
           data = bufferParser.readString(true);
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${data})`
-          );
+          self._debug &&
+            self._debug(
+              `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${data})`
+            );
           break;
-        case 'xon-xoff': // C->S
+        case "xon-xoff": // C->S
           /*
             boolean   client can do
           */
           data = bufferParser.readBool();
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${data})`
-          );
+          self._debug &&
+            self._debug(
+              `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type}: ${data})`
+            );
           break;
-        case 'auth-agent-req@openssh.com': // C-S
+        case "auth-agent-req@openssh.com": // C-S
           data = null; // No extra data
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`
-          );
+          self._debug &&
+            self._debug(`Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`);
           break;
         default:
-          data = (bufferParser.avail() ? bufferParser.readRaw() : null);
-          self._debug && self._debug(
-            `Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`
-          );
+          data = bufferParser.avail() ? bufferParser.readRaw() : null;
+          self._debug &&
+            self._debug(`Inbound: CHANNEL_REQUEST (r:${recipient}, ${type})`);
       }
     }
     bufferParser.clear();
 
     if (data === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed CHANNEL_REQUEST packet'
-      );
+      return doFatalError(self, "Inbound: Malformed CHANNEL_REQUEST packet");
     }
 
     const handler = self._handlers.CHANNEL_REQUEST;
@@ -1179,10 +1125,7 @@ module.exports = {
     bufferParser.clear();
 
     if (recipient === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed CHANNEL_SUCCESS packet'
-      );
+      return doFatalError(self, "Inbound: Malformed CHANNEL_SUCCESS packet");
     }
 
     self._debug && self._debug(`Inbound: CHANNEL_SUCCESS (r:${recipient})`);
@@ -1200,10 +1143,7 @@ module.exports = {
     bufferParser.clear();
 
     if (recipient === undefined) {
-      return doFatalError(
-        self,
-        'Inbound: Malformed CHANNEL_FAILURE packet'
-      );
+      return doFatalError(self, "Inbound: Malformed CHANNEL_FAILURE packet");
     }
 
     self._debug && self._debug(`Inbound: CHANNEL_FAILURE (r:${recipient})`);
@@ -1211,4 +1151,5 @@ module.exports = {
     const handler = self._handlers.CHANNEL_FAILURE;
     handler && handler(self, recipient);
   },
-};
+} as const;
+export default MISC_HANDLERS;

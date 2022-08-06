@@ -1,7 +1,7 @@
-'use strict';
+"use strict";
 
-const assert = require('assert');
-const { randomBytes } = require('crypto');
+const assert = require("assert");
+const { randomBytes } = require("crypto");
 
 const {
   CIPHER_INFO,
@@ -12,28 +12,28 @@ const {
   NullDecipher,
   createDecipher,
   init: cryptoInit,
-} = require('../lib/protocol/crypto.js');
+} = require("../dist/lib/protocol/crypto.js");
 
 (async () => {
   await cryptoInit;
 
-  console.log(`Crypto binding ${bindingAvailable ? '' : 'not '}available`);
+  console.log(`Crypto binding ${bindingAvailable ? "" : "not "}available`);
   {
     const PAIRS = [
       // cipher, decipher
-      ['native', 'native'],
-      ['binding', 'native'],
-      ['native', 'binding'],
-      ['binding', 'binding'],
+      ["native", "native"],
+      ["binding", "native"],
+      ["native", "binding"],
+      ["binding", "binding"],
     ].slice(0, bindingAvailable ? 4 : 1);
 
     [
       { cipher: null },
-      { cipher: 'chacha20-poly1305@openssh.com' },
-      { cipher: 'aes128-gcm@openssh.com' },
-      { cipher: 'aes128-cbc', mac: 'hmac-sha1-etm@openssh.com' },
-      { cipher: 'aes128-ctr', mac: 'hmac-sha1' },
-      { cipher: 'arcfour', mac: 'hmac-sha2-256-96' },
+      { cipher: "chacha20-poly1305@openssh.com" },
+      { cipher: "aes128-gcm@openssh.com" },
+      { cipher: "aes128-cbc", mac: "hmac-sha1-etm@openssh.com" },
+      { cipher: "aes128-ctr", mac: "hmac-sha1" },
+      { cipher: "arcfour", mac: "hmac-sha2-256-96" },
     ].forEach((testConfig) => {
       for (const pair of PAIRS) {
         function onCipherData(data) {
@@ -69,12 +69,14 @@ const {
         let cipherInfo;
         let config;
 
-        console.log('Testing cipher: %s, mac: %s (%s encrypt, %s decrypt) ...',
-                    testConfig.cipher,
-                    testConfig.mac
-                      || (testConfig.cipher === null ? '<none>' : '<implicit>'),
-                    pair[0],
-                    pair[1]);
+        console.log(
+          "Testing cipher: %s, mac: %s (%s encrypt, %s decrypt) ...",
+          testConfig.cipher,
+          testConfig.mac ||
+            (testConfig.cipher === null ? "<none>" : "<implicit>"),
+          pair[0],
+          pair[1]
+        );
 
         if (testConfig.cipher === null) {
           cipher = new NullCipher(1, onCipherData);
@@ -91,12 +93,12 @@ const {
           } else if (cipherInfo.authLen) {
             macSize = cipherInfo.authLen;
           } else {
-            throw new Error('Missing MAC for cipher');
+            throw new Error("Missing MAC for cipher");
           }
           const key = randomBytes(cipherInfo.keyLen);
-          const iv = (cipherInfo.ivLen
-                      ? randomBytes(cipherInfo.ivLen)
-                      : Buffer.alloc(0));
+          const iv = cipherInfo.ivLen
+            ? randomBytes(cipherInfo.ivLen)
+            : Buffer.alloc(0);
           config = {
             outbound: {
               onWrite: onCipherData,
@@ -105,8 +107,8 @@ const {
               cipherIV: Buffer.from(iv),
               seqno: 1,
               macInfo,
-              macKey: (macKey && Buffer.from(macKey)),
-              forceNative: (pair[0] === 'native'),
+              macKey: macKey && Buffer.from(macKey),
+              forceNative: pair[0] === "native",
             },
             inbound: {
               onPayload: onDecipherPayload,
@@ -115,17 +117,19 @@ const {
               decipherIV: Buffer.from(iv),
               seqno: 1,
               macInfo,
-              macKey: (macKey && Buffer.from(macKey)),
-              forceNative: (pair[1] === 'native'),
+              macKey: macKey && Buffer.from(macKey),
+              forceNative: pair[1] === "native",
             },
           };
           try {
             cipher = createCipher(config);
           } catch (ex) {
-            if (ex.code === 'ERR_OSSL_EVP_UNSUPPORTED'
-                || /unsupported/i.test(ex.message)) {
+            if (
+              ex.code === "ERR_OSSL_EVP_UNSUPPORTED" ||
+              /unsupported/i.test(ex.message)
+            ) {
               console.log(
-                '  ... skipping because cipher is unsupported by OpenSSL'
+                "  ... skipping because cipher is unsupported by OpenSSL"
               );
               continue;
             }
@@ -134,24 +138,24 @@ const {
           try {
             decipher = createDecipher(config);
           } catch (ex) {
-            if (ex.code === 'ERR_OSSL_EVP_UNSUPPORTED'
-                || /unsupported/i.test(ex.message)) {
+            if (
+              ex.code === "ERR_OSSL_EVP_UNSUPPORTED" ||
+              /unsupported/i.test(ex.message)
+            ) {
               console.log(
-                '  ... skipping because cipher is unsupported by OpenSSL'
+                "  ... skipping because cipher is unsupported by OpenSSL"
               );
               continue;
             }
             throw ex;
           }
 
-          if (pair[0] === 'binding')
+          if (pair[0] === "binding")
             assert(/binding/i.test(cipher.constructor.name));
-          else
-            assert(/native/i.test(cipher.constructor.name));
-          if (pair[1] === 'binding')
+          else assert(/native/i.test(cipher.constructor.name));
+          if (pair[1] === "binding")
             assert(/binding/i.test(decipher.constructor.name));
-          else
-            assert(/native/i.test(decipher.constructor.name));
+          else assert(/native/i.test(decipher.constructor.name));
         }
 
         let expectedSeqno;
@@ -163,8 +167,10 @@ const {
         packet = cipher.allocPacket(payload.length);
         payload.copy(packet, 5);
         cipher.encrypt(packet);
-        assert.strictEqual(decipher.decrypt(ciphered, 0, ciphered.length),
-                           undefined);
+        assert.strictEqual(
+          decipher.decrypt(ciphered, 0, ciphered.length),
+          undefined
+        );
 
         assert.strictEqual(cipher.outSeqno, expectedSeqno);
         assert(ciphered.length >= 9 + macSize);
@@ -173,15 +179,17 @@ const {
         assert.deepStrictEqual(deciphered[0], payload);
 
         // Test single byte payload ============================================
-        payload = Buffer.from([ 0xEF ]);
+        payload = Buffer.from([0xef]);
         expectedSeqno = 3;
 
         reset();
         packet = cipher.allocPacket(payload.length);
         payload.copy(packet, 5);
         cipher.encrypt(packet);
-        assert.strictEqual(decipher.decrypt(ciphered, 0, ciphered.length),
-                           undefined);
+        assert.strictEqual(
+          decipher.decrypt(ciphered, 0, ciphered.length),
+          undefined
+        );
 
         assert.strictEqual(cipher.outSeqno, 3);
         assert(ciphered.length >= 9 + macSize);
@@ -197,8 +205,10 @@ const {
         packet = cipher.allocPacket(payload.length);
         payload.copy(packet, 5);
         cipher.encrypt(packet);
-        assert.strictEqual(decipher.decrypt(ciphered, 0, ciphered.length),
-                           undefined);
+        assert.strictEqual(
+          decipher.decrypt(ciphered, 0, ciphered.length),
+          undefined
+        );
 
         assert.strictEqual(cipher.outSeqno, expectedSeqno);
         assert(ciphered.length >= 9 + macSize);
@@ -209,14 +219,16 @@ const {
         // Test sequnce number rollover ========================================
         payload = randomBytes(4);
         expectedSeqno = 0;
-        cipher.outSeqno = decipher.inSeqno = (2 ** 32) - 1;
+        cipher.outSeqno = decipher.inSeqno = 2 ** 32 - 1;
 
         reset();
         packet = cipher.allocPacket(payload.length);
         payload.copy(packet, 5);
         cipher.encrypt(packet);
-        assert.strictEqual(decipher.decrypt(ciphered, 0, ciphered.length),
-                           undefined);
+        assert.strictEqual(
+          decipher.decrypt(ciphered, 0, ciphered.length),
+          undefined
+        );
 
         assert.strictEqual(cipher.outSeqno, expectedSeqno);
         assert(ciphered.length >= 9 + macSize);
@@ -233,8 +245,10 @@ const {
         payload.copy(packet, 5);
         cipher.encrypt(packet);
         assert.strictEqual(decipher.decrypt(ciphered, 0, 2), undefined);
-        assert.strictEqual(decipher.decrypt(ciphered, 2, ciphered.length),
-                           undefined);
+        assert.strictEqual(
+          decipher.decrypt(ciphered, 2, ciphered.length),
+          undefined
+        );
 
         assert.strictEqual(cipher.outSeqno, expectedSeqno);
         assert(ciphered.length >= 9 + macSize);
@@ -251,8 +265,10 @@ const {
         payload.copy(packet, 5);
         cipher.encrypt(packet);
         assert.strictEqual(decipher.decrypt(ciphered, 0, 4), undefined);
-        assert.strictEqual(decipher.decrypt(ciphered, 4, ciphered.length),
-                           undefined);
+        assert.strictEqual(
+          decipher.decrypt(ciphered, 4, ciphered.length),
+          undefined
+        );
 
         assert.strictEqual(cipher.outSeqno, expectedSeqno);
         assert(ciphered.length >= 9 + macSize);
@@ -273,9 +289,11 @@ const {
           undefined
         );
         assert.strictEqual(
-          decipher.decrypt(ciphered,
-                           ciphered.length - macSize,
-                           ciphered.length),
+          decipher.decrypt(
+            ciphered,
+            ciphered.length - macSize,
+            ciphered.length
+          ),
           undefined
         );
 
@@ -299,8 +317,7 @@ const {
             assert(ex instanceof Error);
             assert(/packet length/i.test(ex.message));
           }
-          if (!threw)
-            throw new Error('Expected error');
+          if (!threw) throw new Error("Expected error");
 
           // Recreate deciphers since errors leave them in an unusable state.
           // We recreate the ciphers as well so that internal states of both
@@ -312,8 +329,10 @@ const {
         if (testConfig.cipher !== null) {
           let payloadLen;
           const blockLen = cipherInfo.blockLen;
-          if (/chacha|gcm/i.test(testConfig.cipher)
-              || /etm/i.test(testConfig.mac)) {
+          if (
+            /chacha|gcm/i.test(testConfig.cipher) ||
+            /etm/i.test(testConfig.mac)
+          ) {
             payloadLen = blockLen - 2;
           } else {
             payloadLen = blockLen - 6;
@@ -327,8 +346,7 @@ const {
         // =====================================================================
         cipher.free();
         decipher.free();
-        if (testConfig.cipher === null)
-          break;
+        if (testConfig.cipher === null) break;
       }
     });
   }
@@ -336,44 +354,41 @@ const {
   // Test createCipher()/createDecipher() exceptions
   {
     [
-      [
-        [true, null],
-        /invalid config/i
-      ],
-      [
-        [{}],
-        [/invalid outbound/i, /invalid inbound/i]
-      ],
+      [[true, null], /invalid config/i],
+      [[{}], [/invalid outbound/i, /invalid inbound/i]],
       [
         [{ outbound: {}, inbound: {} }],
-        [/invalid outbound\.onWrite/i, /invalid inbound\.onPayload/i]
+        [/invalid outbound\.onWrite/i, /invalid inbound\.onPayload/i],
       ],
       [
         [
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
-              cipherInfo: true
+              cipherInfo: true,
             },
             inbound: {
               onPayload: () => {},
-              decipherInfo: true
+              decipherInfo: true,
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
-              cipherInfo: null
+              cipherInfo: null,
             },
             inbound: {
               onPayload: () => {},
-              decipherInfo: null
+              decipherInfo: null,
             },
           },
         ],
-        [/invalid outbound\.cipherInfo/i, /invalid inbound\.decipherInfo/i]
+        [/invalid outbound\.cipherInfo/i, /invalid inbound\.decipherInfo/i],
       ],
       [
         [
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
               cipherInfo: {},
               cipherKey: {},
@@ -384,7 +399,8 @@ const {
               decipherKey: {},
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
               cipherInfo: { keyLen: 32 },
               cipherKey: Buffer.alloc(8),
@@ -396,227 +412,241 @@ const {
             },
           },
         ],
-        [/invalid outbound\.cipherKey/i, /invalid inbound\.decipherKey/i]
+        [/invalid outbound\.cipherKey/i, /invalid inbound\.decipherKey/i],
       ],
       [
         [
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
               cipherInfo: { keyLen: 1, ivLen: 12 },
               cipherKey: Buffer.alloc(1),
-              cipherIV: true
+              cipherIV: true,
             },
             inbound: {
               onPayload: () => {},
               decipherInfo: { keyLen: 1, ivLen: 12 },
               decipherKey: Buffer.alloc(1),
-              cipherIV: true
+              cipherIV: true,
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
               cipherInfo: { keyLen: 1, ivLen: 12 },
               cipherKey: Buffer.alloc(1),
-              cipherIV: null
+              cipherIV: null,
             },
             inbound: {
               onPayload: () => {},
               decipherInfo: { keyLen: 1, ivLen: 12 },
               decipherKey: Buffer.alloc(1),
-              cipherIV: null
+              cipherIV: null,
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
               cipherInfo: { keyLen: 1, ivLen: 12 },
               cipherKey: Buffer.alloc(1),
-              cipherIV: {}
+              cipherIV: {},
             },
             inbound: {
               onPayload: () => {},
               decipherInfo: { keyLen: 1, ivLen: 12 },
               decipherKey: Buffer.alloc(1),
-              cipherIV: {}
+              cipherIV: {},
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
               cipherInfo: { keyLen: 1, ivLen: 12 },
               cipherKey: Buffer.alloc(1),
-              cipherIV: Buffer.alloc(1)
+              cipherIV: Buffer.alloc(1),
             },
             inbound: {
               onPayload: () => {},
               decipherInfo: { keyLen: 1, ivLen: 12 },
               decipherKey: Buffer.alloc(1),
-              cipherIV: Buffer.alloc(1)
+              cipherIV: Buffer.alloc(1),
             },
           },
         ],
-        [/invalid outbound\.cipherIV/i, /invalid inbound\.decipherIV/i]
+        [/invalid outbound\.cipherIV/i, /invalid inbound\.decipherIV/i],
       ],
       [
         [
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
               cipherInfo: { keyLen: 1, ivLen: 0 },
               cipherKey: Buffer.alloc(1),
-              seqno: true
+              seqno: true,
             },
             inbound: {
               onPayload: () => {},
               decipherInfo: { keyLen: 1, ivLen: 0 },
               decipherKey: Buffer.alloc(1),
-              seqno: true
+              seqno: true,
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
               cipherInfo: { keyLen: 1, ivLen: 0 },
               cipherKey: Buffer.alloc(1),
-              seqno: -1
+              seqno: -1,
             },
             inbound: {
               onPayload: () => {},
               decipherInfo: { keyLen: 1, ivLen: 0 },
               decipherKey: Buffer.alloc(1),
-              seqno: -1
+              seqno: -1,
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
               cipherInfo: { keyLen: 1, ivLen: 0 },
               cipherKey: Buffer.alloc(1),
-              seqno: 2 ** 32
+              seqno: 2 ** 32,
             },
             inbound: {
               onPayload: () => {},
               decipherInfo: { keyLen: 1, ivLen: 0 },
               decipherKey: Buffer.alloc(1),
-              seqno: 2 ** 32
+              seqno: 2 ** 32,
             },
           },
         ],
-        [/invalid outbound\.seqno/i, /invalid inbound\.seqno/i]
+        [/invalid outbound\.seqno/i, /invalid inbound\.seqno/i],
       ],
       [
         [
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
-              cipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              cipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               cipherKey: Buffer.alloc(1),
-              seqno: 0
+              seqno: 0,
             },
             inbound: {
               onPayload: () => {},
-              decipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              decipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               decipherKey: Buffer.alloc(1),
-              seqno: 0
+              seqno: 0,
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
-              cipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              cipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               cipherKey: Buffer.alloc(1),
               seqno: 0,
-              macInfo: true
+              macInfo: true,
             },
             inbound: {
               onPayload: () => {},
-              decipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              decipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               decipherKey: Buffer.alloc(1),
               seqno: 0,
-              macInfo: true
+              macInfo: true,
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
-              cipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              cipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               cipherKey: Buffer.alloc(1),
               seqno: 0,
-              macInfo: null
+              macInfo: null,
             },
             inbound: {
               onPayload: () => {},
-              decipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              decipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               decipherKey: Buffer.alloc(1),
               seqno: 0,
-              macInfo: null
+              macInfo: null,
             },
           },
         ],
-        [/invalid outbound\.macInfo/i, /invalid inbound\.macInfo/i]
+        [/invalid outbound\.macInfo/i, /invalid inbound\.macInfo/i],
       ],
       [
         [
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
-              cipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              cipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               cipherKey: Buffer.alloc(1),
               seqno: 0,
-              macInfo: { keyLen: 16 }
+              macInfo: { keyLen: 16 },
             },
             inbound: {
               onPayload: () => {},
-              decipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              decipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               decipherKey: Buffer.alloc(1),
               seqno: 0,
-              macInfo: { keyLen: 16 }
+              macInfo: { keyLen: 16 },
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
-              cipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              cipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               cipherKey: Buffer.alloc(1),
               seqno: 0,
               macInfo: { keyLen: 16 },
-              macKey: true
+              macKey: true,
             },
             inbound: {
               onPayload: () => {},
-              decipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              decipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               decipherKey: Buffer.alloc(1),
               seqno: 0,
               macInfo: { keyLen: 16 },
-              macKey: true
+              macKey: true,
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
-              cipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              cipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               cipherKey: Buffer.alloc(1),
               seqno: 0,
               macInfo: { keyLen: 16 },
-              macKey: null
+              macKey: null,
             },
             inbound: {
               onPayload: () => {},
-              decipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              decipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               decipherKey: Buffer.alloc(1),
               seqno: 0,
               macInfo: { keyLen: 16 },
-              macKey: null
+              macKey: null,
             },
           },
-          { outbound: {
+          {
+            outbound: {
               onWrite: () => {},
-              cipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              cipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               cipherKey: Buffer.alloc(1),
               seqno: 0,
               macInfo: { keyLen: 16 },
-              macKey: Buffer.alloc(1)
+              macKey: Buffer.alloc(1),
             },
             inbound: {
               onPayload: () => {},
-              decipherInfo: { keyLen: 1, ivLen: 0, sslName: 'foo' },
+              decipherInfo: { keyLen: 1, ivLen: 0, sslName: "foo" },
               decipherKey: Buffer.alloc(1),
               seqno: 0,
               macInfo: { keyLen: 16 },
-              macKey: Buffer.alloc(1)
+              macKey: Buffer.alloc(1),
             },
           },
         ],
-        [/invalid outbound\.macKey/i, /invalid inbound\.macKey/i]
+        [/invalid outbound\.macKey/i, /invalid inbound\.macKey/i],
       ],
     ].forEach((testCase) => {
       let errorChecks = testCase[1];

@@ -1,6 +1,6 @@
-'use strict';
+import { kMaxLength } from "buffer";
+import zlib from "zlib";
 
-const { kMaxLength } = require('buffer');
 const {
   createInflate,
   constants: {
@@ -12,35 +12,41 @@ const {
     Z_DEFAULT_STRATEGY,
     Z_DEFAULT_WINDOWBITS,
     Z_PARTIAL_FLUSH,
-  }
-} = require('zlib');
-const ZlibHandle = createInflate()._handle.constructor;
+  },
+} = zlib;
+const ZlibHandle = (createInflate() as any)._handle.constructor;
 
 function processCallback() {
-  throw new Error('Should not get here');
+  throw new Error("Should not get here");
 }
 
-function zlibOnError(message, errno, code) {
+function zlibOnError(this: any, message, errno, code) {
   const self = this._owner;
   // There is no way to cleanly recover.
   // Continuing only obscures problems.
 
   const error = new Error(message);
-  error.errno = errno;
-  error.code = code;
+  (error as any).errno = errno;
+  (error as any).code = code;
   self._err = error;
 }
 
 function _close(engine) {
   // Caller may invoke .close after a zlib error (which will null _handle).
-  if (!engine._handle)
-    return;
+  if (!engine._handle) return;
 
   engine._handle.close();
   engine._handle = null;
 }
 
-class Zlib {
+export class Zlib {
+  _chunkSize: any;
+  _err: any;
+  _handle: any;
+  _maxOutputLength: any;
+  _outBuffer: any;
+  _outOffset: any;
+  _writeState: any;
   constructor(mode) {
     const windowBits = Z_DEFAULT_WINDOWBITS;
     const level = Z_DEFAULT_COMPRESSION;
@@ -58,19 +64,20 @@ class Zlib {
     this._handle = new ZlibHandle(mode);
     this._handle._owner = this;
     this._handle.onerror = zlibOnError;
-    this._handle.init(windowBits,
-                      level,
-                      memLevel,
-                      strategy,
-                      this._writeState,
-                      processCallback,
-                      dictionary);
+    this._handle.init(
+      windowBits,
+      level,
+      memLevel,
+      strategy,
+      this._writeState,
+      processCallback,
+      dictionary
+    );
   }
 
   writeSync(chunk, retChunks) {
     const handle = this._handle;
-    if (!handle)
-      throw new Error('Invalid Zlib instance');
+    if (!handle) throw new Error("Invalid Zlib instance");
 
     let availInBefore = chunk.length;
     let availOutBefore = this._chunkSize - this._outOffset;
@@ -86,15 +93,16 @@ class Zlib {
     const chunkSize = this._chunkSize;
 
     while (true) {
-      handle.writeSync(Z_PARTIAL_FLUSH,
-                       chunk, // in
-                       inOff, // in_off
-                       availInBefore, // in_len
-                       buffer, // out
-                       offset, // out_off
-                       availOutBefore); // out_len
-      if (this._err)
-        throw this._err;
+      handle.writeSync(
+        Z_PARTIAL_FLUSH,
+        chunk, // in
+        inOff, // in_off
+        availInBefore, // in_len
+        buffer, // out
+        offset, // out_off
+        availOutBefore
+      ); // out_len
+      if (this._err) throw this._err;
 
       availOutAfter = state[0];
       availInAfter = state[1];
@@ -103,16 +111,14 @@ class Zlib {
       const have = availOutBefore - availOutAfter;
 
       if (have > 0) {
-        const out = (offset === 0 && have === buffer.length
-                     ? buffer
-                     : buffer.slice(offset, offset + have));
+        const out =
+          offset === 0 && have === buffer.length
+            ? buffer
+            : buffer.slice(offset, offset + have);
         offset += have;
-        if (!buffers)
-          buffers = out;
-        else if (buffers.push === undefined)
-          buffers = [buffers, out];
-        else
-          buffers.push(out);
+        if (!buffers) buffers = out;
+        else if (buffers.push === undefined) buffers = [buffers, out];
+        else buffers.push(out);
         nread += out.byteLength;
 
         if (nread > this._maxOutputLength) {
@@ -122,7 +128,7 @@ class Zlib {
           );
         }
       } else if (have !== 0) {
-        throw new Error('have should not go down');
+        throw new Error("have should not go down");
       }
 
       // Exhausted the output buffer, or used all the input create a new one.
@@ -147,16 +153,14 @@ class Zlib {
     this._outBuffer = buffer;
     this._outOffset = offset;
 
-    if (nread === 0)
-      buffers = Buffer.alloc(0);
+    if (nread === 0) buffers = Buffer.alloc(0);
 
     if (retChunks) {
       buffers.totalLen = nread;
       return buffers;
     }
 
-    if (buffers.push === undefined)
-      return buffers;
+    if (buffers.push === undefined) return buffers;
 
     const output = Buffer.allocUnsafe(nread);
     for (let i = 0, p = 0; i < buffers.length; ++i) {
@@ -168,7 +172,11 @@ class Zlib {
   }
 }
 
-class ZlibPacketWriter {
+export class ZlibPacketWriter {
+  _protocol: any;
+  _zlib: any;
+  allocStart: any;
+  allocStartKEX: any;
   constructor(protocol) {
     this.allocStart = 0;
     this.allocStartKEX = 0;
@@ -177,8 +185,7 @@ class ZlibPacketWriter {
   }
 
   cleanup() {
-    if (this._zlib)
-      _close(this._zlib);
+    if (this._zlib) _close(this._zlib);
   }
 
   alloc(payloadSize, force) {
@@ -204,7 +211,10 @@ class ZlibPacketWriter {
   }
 }
 
-class PacketWriter {
+export class PacketWriter {
+  _protocol: any;
+  allocStart: any;
+  allocStartKEX: any;
   constructor(protocol) {
     this.allocStart = 5;
     this.allocStartKEX = 5;
@@ -224,14 +234,14 @@ class PacketWriter {
   }
 }
 
-class ZlibPacketReader {
+export class ZlibPacketReader {
+  _zlib: any;
   constructor() {
     this._zlib = new Zlib(INFLATE);
   }
 
   cleanup() {
-    if (this._zlib)
-      _close(this._zlib);
+    if (this._zlib) _close(this._zlib);
   }
 
   read(data) {
@@ -239,7 +249,7 @@ class ZlibPacketReader {
   }
 }
 
-class PacketReader {
+export class PacketReader {
   cleanup() {}
 
   read(data) {
@@ -247,7 +257,7 @@ class PacketReader {
   }
 }
 
-module.exports = {
+export default {
   PacketReader,
   PacketWriter,
   ZlibPacketReader,

@@ -1,22 +1,17 @@
-'use strict';
-
-const EventEmitter = require('events');
-const fs = require('fs');
+import EventEmitter from "events";
+import fs from "fs";
 const { constants } = fs;
-const {
-  Readable: ReadableStream,
-  Writable: WritableStream
-} = require('stream');
-const { inherits, isDate } = require('util');
+import { Readable as ReadableStream, Writable as WritableStream } from "stream";
+import { inherits, isDate } from "util";
 
 const FastBuffer = Buffer[Symbol.species];
 
-const {
+import {
   bufferCopy,
   bufferSlice,
   makeBufferParser,
   writeUInt32BE,
-} = require('./utils.js');
+} from "./utils";
 
 const ATTR = {
   SIZE: 0x00000001,
@@ -29,7 +24,7 @@ const ATTR = {
 // Large enough to store all possible attributes
 const ATTRS_BUF = Buffer.alloc(28);
 
-const STATUS_CODE = {
+export const STATUS_CODE = {
   OK: 0,
   EOF: 1,
   NO_SUCH_FILE: 2,
@@ -38,7 +33,7 @@ const STATUS_CODE = {
   BAD_MESSAGE: 5,
   NO_CONNECTION: 6,
   CONNECTION_LOST: 7,
-  OP_UNSUPPORTED: 8
+  OP_UNSUPPORTED: 8,
 };
 
 const VALID_STATUS_CODES = new Map(
@@ -46,15 +41,15 @@ const VALID_STATUS_CODES = new Map(
 );
 
 const STATUS_CODE_STR = {
-  [STATUS_CODE.OK]: 'No error',
-  [STATUS_CODE.EOF]: 'End of file',
-  [STATUS_CODE.NO_SUCH_FILE]: 'No such file or directory',
-  [STATUS_CODE.PERMISSION_DENIED]: 'Permission denied',
-  [STATUS_CODE.FAILURE]: 'Failure',
-  [STATUS_CODE.BAD_MESSAGE]: 'Bad message',
-  [STATUS_CODE.NO_CONNECTION]: 'No connection',
-  [STATUS_CODE.CONNECTION_LOST]: 'Connection lost',
-  [STATUS_CODE.OP_UNSUPPORTED]: 'Operation unsupported',
+  [STATUS_CODE.OK]: "No error",
+  [STATUS_CODE.EOF]: "End of file",
+  [STATUS_CODE.NO_SUCH_FILE]: "No such file or directory",
+  [STATUS_CODE.PERMISSION_DENIED]: "Permission denied",
+  [STATUS_CODE.FAILURE]: "Failure",
+  [STATUS_CODE.BAD_MESSAGE]: "Bad message",
+  [STATUS_CODE.NO_CONNECTION]: "No connection",
+  [STATUS_CODE.CONNECTION_LOST]: "Connection lost",
+  [STATUS_CODE.OP_UNSUPPORTED]: "Operation unsupported",
 };
 
 const REQUEST = {
@@ -77,7 +72,7 @@ const REQUEST = {
   RENAME: 18,
   READLINK: 19,
   SYMLINK: 20,
-  EXTENDED: 200
+  EXTENDED: 200,
 };
 
 const RESPONSE = {
@@ -87,29 +82,41 @@ const RESPONSE = {
   DATA: 103,
   NAME: 104,
   ATTRS: 105,
-  EXTENDED: 201
+  EXTENDED: 201,
 };
 
-const OPEN_MODE = {
+export const OPEN_MODE = {
   READ: 0x00000001,
   WRITE: 0x00000002,
   APPEND: 0x00000004,
   CREAT: 0x00000008,
   TRUNC: 0x00000010,
-  EXCL: 0x00000020
+  EXCL: 0x00000020,
 };
 
 const PKT_RW_OVERHEAD = 2 * 1024;
 const MAX_REQID = 2 ** 32 - 1;
 const CLIENT_VERSION_BUFFER = Buffer.from([
-  0, 0, 0, 5 /* length */,
-    REQUEST.INIT,
-    0, 0, 0, 3 /* version */
+  0,
+  0,
+  0,
+  5 /* length */,
+  REQUEST.INIT,
+  0,
+  0,
+  0,
+  3 /* version */,
 ]);
 const SERVER_VERSION_BUFFER = Buffer.from([
-  0, 0, 0, 5 /* length */,
-    RESPONSE.VERSION,
-    0, 0, 0, 3 /* version */
+  0,
+  0,
+  0,
+  5 /* length */,
+  RESPONSE.VERSION,
+  0,
+  0,
+  0,
+  3 /* version */,
 ]);
 
 const RE_OPENSSH = /^SSH-2.0-(?:OpenSSH|dropbear)/;
@@ -131,18 +138,50 @@ function noop() {}
 
 // Emulates enough of `Channel` to be able to be used as a drop-in replacement
 // in order to process incoming data with as little overhead as possible
-class SFTP extends EventEmitter {
-  constructor(client, chanInfo, cfg) {
+export class SFTP extends EventEmitter {
+  _biOpt: any;
+  _buffer: any;
+  _callbacks: any;
+  _chunkcb: any;
+  _client: any;
+  _debug: any;
+  _exit: any;
+  _extensions: any;
+  _hasX11: any;
+  _isOpenSSH: any;
+  _maxInPktLen: any;
+  _maxOutPktLen: any;
+  _maxReadLen: any;
+  _maxWriteLen: any;
+  _pkt: any;
+  _pktData: any;
+  _pktLen: any;
+  _pktLenBytes: any;
+  _pktPos: any;
+  _pktType: any;
+  _protocol: any;
+  _requests: any;
+  _version: any;
+  _waitWindow: any;
+  _writeReqid: any;
+  incoming: any;
+  maxOpenHandles: any;
+  outgoing: any;
+  readable: any;
+  server: any;
+  stderr: any;
+  subtype: any;
+  type: any;
+  constructor(client, { type, incoming, outgoing }, cfg) {
     super();
 
-    if (typeof cfg !== 'object' || !cfg)
-      cfg = {};
+    if (typeof cfg !== "object" || !cfg) cfg = {};
 
     const remoteIdentRaw = client._protocol._remoteIdentRaw;
 
     this.server = !!cfg.server;
-    this._debug = (typeof cfg.debug === 'function' ? cfg.debug : undefined);
-    this._isOpenSSH = (remoteIdentRaw && RE_OPENSSH.test(remoteIdentRaw));
+    this._debug = typeof cfg.debug === "function" ? cfg.debug : undefined;
+    this._isOpenSSH = remoteIdentRaw && RE_OPENSSH.test(remoteIdentRaw);
 
     this._version = -1;
     this._extensions = {};
@@ -177,10 +216,10 @@ class SFTP extends EventEmitter {
     this._waitWindow = false; // SSH-level backpressure
     this._chunkcb = undefined;
     this._buffer = [];
-    this.type = chanInfo.type;
+    this.type = type;
     this.subtype = undefined;
-    this.incoming = chanInfo.incoming;
-    this.outgoing = chanInfo.outgoing;
+    this.incoming = incoming;
+    this.outgoing = outgoing;
     this.stderr = fakeStderr;
     this.readable = true;
   }
@@ -189,11 +228,10 @@ class SFTP extends EventEmitter {
   push(data) {
     if (data === null) {
       cleanupRequests(this);
-      if (!this.readable)
-        return;
+      if (!this.readable) return;
       // No more incoming data from the remote side
       this.readable = false;
-      this.emit('end');
+      this.emit("end");
       return;
     }
     /*
@@ -208,22 +246,21 @@ class SFTP extends EventEmitter {
         let nb = Math.min(4 - this._pktLenBytes, data.length - p);
         this._pktLenBytes += nb;
 
-        while (nb--)
-          this._pktLen = (this._pktLen << 8) + data[p++];
+        while (nb--) this._pktLen = (this._pktLen << 8) + data[p++];
 
-        if (this._pktLenBytes < 4)
-          return;
+        if (this._pktLenBytes < 4) return;
         if (this._pktLen === 0)
-          return doFatalSFTPError(this, 'Invalid packet length');
+          // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+          return doFatalSFTPError(this, "Invalid packet length");
         if (this._pktLen > this._maxInPktLen) {
           const max = this._maxInPktLen;
+          // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
           return doFatalSFTPError(
             this,
             `Packet length ${this._pktLen} exceeds max length of ${max}`
           );
         }
-        if (p >= data.length)
-          return;
+        if (p >= data.length) return;
       }
       if (this._pktPos < this._pktLen) {
         const nb = Math.min(this._pktLen - this._pktPos, data.length - p);
@@ -231,8 +268,7 @@ class SFTP extends EventEmitter {
           if (nb === this._pktLen) {
             this._pkt = new FastBuffer(data.buffer, data.byteOffset + p, nb);
           } else {
-            if (!this._pkt)
-              this._pkt = Buffer.allocUnsafe(this._pktLen);
+            if (!this._pkt) this._pkt = Buffer.allocUnsafe(this._pktLen);
             this._pkt.set(
               new Uint8Array(data.buffer, data.byteOffset + p, nb),
               this._pktPos
@@ -241,14 +277,12 @@ class SFTP extends EventEmitter {
         } else if (nb === this._pktLen) {
           this._pkt = data;
         } else {
-          if (!this._pkt)
-            this._pkt = Buffer.allocUnsafe(this._pktLen);
+          if (!this._pkt) this._pkt = Buffer.allocUnsafe(this._pktLen);
           this._pkt.set(data, this._pktPos);
         }
         p += nb;
         this._pktPos += nb;
-        if (this._pktPos < this._pktLen)
-          return;
+        if (this._pktPos < this._pktLen) return;
       }
 
       const type = this._pkt[0];
@@ -260,23 +294,25 @@ class SFTP extends EventEmitter {
       this._pkt = undefined;
       this._pktPos = 0;
 
-      const handler = (this.server
-                       ? SERVER_HANDLERS[type]
-                       : CLIENT_HANDLERS[type]);
+      const handler = this.server
+        ? SERVER_HANDLERS[type]
+        : CLIENT_HANDLERS[type];
       if (!handler)
+        // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
         return doFatalSFTPError(this, `Unknown packet type ${type}`);
 
       if (this._version === -1) {
         if (this.server) {
           if (type !== REQUEST.INIT)
+            // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
             return doFatalSFTPError(this, `Expected INIT packet, got ${type}`);
         } else if (type !== RESPONSE.VERSION) {
+          // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
           return doFatalSFTPError(this, `Expected VERSION packet, got ${type}`);
         }
       }
 
-      if (handler(this, payload) === false)
-        return;
+      if (handler(this, payload) === false) return;
     }
   }
 
@@ -284,15 +320,14 @@ class SFTP extends EventEmitter {
     this.destroy();
   }
   destroy() {
-    if (this.outgoing.state === 'open' || this.outgoing.state === 'eof') {
-      this.outgoing.state = 'closing';
+    if (this.outgoing.state === "open" || this.outgoing.state === "eof") {
+      this.outgoing.state = "closing";
       this._protocol.channelClose(this.outgoing.id);
     }
   }
   _init() {
     this._init = noop;
-    if (!this.server)
-      sendOrBuffer(this, CLIENT_VERSION_BUFFER);
+    if (!this.server) sendOrBuffer(this, CLIENT_VERSION_BUFFER);
   }
 
   // ===========================================================================
@@ -300,34 +335,33 @@ class SFTP extends EventEmitter {
   // ===========================================================================
   createReadStream(path, options) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     return new ReadStream(this, path, options);
   }
   createWriteStream(path, options) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     return new WriteStream(this, path, options);
   }
   open(path, flags_, attrs, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    if (typeof attrs === 'function') {
+    if (typeof attrs === "function") {
       cb = attrs;
       attrs = undefined;
     }
 
-    const flags = (typeof flags_ === 'number' ? flags_ : stringToFlags(flags_));
-    if (flags === null)
-      throw new Error(`Unknown flags string: ${flags_}`);
+    const flags = typeof flags_ === "number" ? flags_ : stringToFlags(flags_);
+    if (flags === null) throw new Error(`Unknown flags string: ${flags_}`);
 
     let attrsFlags = 0;
     let attrsLen = 0;
-    if (typeof attrs === 'string' || typeof attrs === 'number')
+    if (typeof attrs === "string" || typeof attrs === "number")
       attrs = { mode: attrs };
-    if (typeof attrs === 'object' && attrs !== null) {
+    if (typeof attrs === "object" && attrs !== null) {
       attrs = attrsToBytes(attrs);
       attrsFlags = attrs.flags;
       attrsLen = attrs.nb;
@@ -345,36 +379,34 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.OPEN;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, pathLen, p);
-    buf.utf8Write(path, p += 4, pathLen);
-    writeUInt32BE(buf, flags, p += pathLen);
-    writeUInt32BE(buf, attrsFlags, p += 4);
+    (buf as any).utf8Write(path, (p += 4), pathLen);
+    writeUInt32BE(buf, flags, (p += pathLen));
+    writeUInt32BE(buf, attrsFlags, (p += 4));
     if (attrsLen) {
       p += 4;
 
-      if (attrsLen === ATTRS_BUF.length)
-        buf.set(ATTRS_BUF, p);
-      else
-        bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
+      if (attrsLen === ATTRS_BUF.length) buf.set(ATTRS_BUF, p);
+      else bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
 
       p += attrsLen;
     }
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} OPEN`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} OPEN`
+      );
   }
   close(handle, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    if (!Buffer.isBuffer(handle))
-      throw new Error('handle is not a Buffer');
+    if (!Buffer.isBuffer(handle)) throw new Error("handle is not a Buffer");
 
     /*
       uint32     id
@@ -386,33 +418,31 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.CLOSE;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, handleLen, p);
-    buf.set(handle, p += 4);
+    buf.set(handle, (p += 4));
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} CLOSE`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} CLOSE`
+      );
   }
   read(handle, buf, off, len, position, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
-    if (!Buffer.isBuffer(handle))
-      throw new Error('handle is not a Buffer');
-    if (!Buffer.isBuffer(buf))
-      throw new Error('buffer is not a Buffer');
-    if (off >= buf.length)
-      throw new Error('offset is out of bounds');
-    if (off + len > buf.length)
-      throw new Error('length extends beyond buffer');
+      throw new Error("Client-only method called in server mode");
+    if (!Buffer.isBuffer(handle)) throw new Error("handle is not a Buffer");
+    if (!Buffer.isBuffer(buf)) throw new Error("buffer is not a Buffer");
+    if (off >= buf.length) throw new Error("offset is out of bounds");
+    if (off + len > buf.length) throw new Error("length extends beyond buffer");
     if (position === null)
-      throw new Error('null position currently unsupported');
+      throw new Error("null position currently unsupported");
 
+    // @ts-expect-error TS(2554): Expected 8 arguments, but got 7.
     read_(this, handle, buf, off, len, position, cb);
   }
   readData(handle, buf, off, len, position, cb) {
@@ -421,18 +451,14 @@ class SFTP extends EventEmitter {
   }
   write(handle, buf, off, len, position, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    if (!Buffer.isBuffer(handle))
-      throw new Error('handle is not a Buffer');
-    if (!Buffer.isBuffer(buf))
-      throw new Error('buffer is not a Buffer');
-    if (off > buf.length)
-      throw new Error('offset is out of bounds');
-    if (off + len > buf.length)
-      throw new Error('length extends beyond buffer');
+    if (!Buffer.isBuffer(handle)) throw new Error("handle is not a Buffer");
+    if (!Buffer.isBuffer(buf)) throw new Error("buffer is not a Buffer");
+    if (off > buf.length) throw new Error("offset is out of bounds");
+    if (off + len > buf.length) throw new Error("length extends beyond buffer");
     if (position === null)
-      throw new Error('null position currently unsupported');
+      throw new Error("null position currently unsupported");
 
     if (!len) {
       cb && process.nextTick(cb, undefined, 0);
@@ -443,8 +469,7 @@ class SFTP extends EventEmitter {
     const overflow = Math.max(len - maxDataLen, 0);
     const origPosition = position;
 
-    if (overflow)
-      len = maxDataLen;
+    if (overflow) len = maxDataLen;
 
     /*
       uint32     id
@@ -458,40 +483,34 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(out, out.length - 4, 0);
     out[4] = REQUEST.WRITE;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(out, reqid, 5);
 
     writeUInt32BE(out, handleLen, p);
-    out.set(handle, p += 4);
+    out.set(handle, (p += 4));
     p += handleLen;
     for (let i = 7; i >= 0; --i) {
-      out[p + i] = position & 0xFF;
+      out[p + i] = position & 0xff;
       position /= 256;
     }
-    writeUInt32BE(out, len, p += 8);
-    bufferCopy(buf, out, off, off + len, p += 4);
+    writeUInt32BE(out, len, (p += 8));
+    bufferCopy(buf, out, off, off + len, (p += 4));
 
     this._requests[reqid] = {
       cb: (err) => {
         if (err) {
-          if (typeof cb === 'function')
-            cb(err);
+          if (typeof cb === "function") cb(err);
         } else if (overflow) {
-          this.write(handle,
-                     buf,
-                     off + len,
-                     overflow,
-                     origPosition + len,
-                     cb);
-        } else if (typeof cb === 'function') {
+          this.write(handle, buf, off + len, overflow, origPosition + len, cb);
+        } else if (typeof cb === "function") {
           cb(undefined, off + len);
         }
-      }
+      },
     };
 
     const isSent = sendOrBuffer(this, out);
     if (this._debug) {
-      const how = (isSent ? 'Sent' : 'Buffered');
+      const how = isSent ? "Sent" : "Buffered";
       this._debug(`SFTP: Outbound: ${how} WRITE (id:${reqid})`);
     }
   }
@@ -501,34 +520,31 @@ class SFTP extends EventEmitter {
   }
   fastGet(remotePath, localPath, opts, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     fastXfer(this, fs, remotePath, localPath, opts, cb);
   }
   fastPut(localPath, remotePath, opts, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     fastXfer(fs, this, localPath, remotePath, opts, cb);
   }
   readFile(path, options, callback_) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     let callback;
-    if (typeof callback_ === 'function') {
+    if (typeof callback_ === "function") {
       callback = callback_;
-    } else if (typeof options === 'function') {
+    } else if (typeof options === "function") {
       callback = options;
       options = undefined;
     }
 
-    if (typeof options === 'string')
-      options = { encoding: options, flag: 'r' };
-    else if (!options)
-      options = { encoding: null, flag: 'r' };
-    else if (typeof options !== 'object')
-      throw new TypeError('Bad arguments');
+    if (typeof options === "string") options = { encoding: options, flag: "r" };
+    else if (!options) options = { encoding: null, flag: "r" };
+    else if (typeof options !== "object") throw new TypeError("Bad arguments");
 
     const encoding = options.encoding;
     if (encoding && !Buffer.isEncoding(encoding))
@@ -545,7 +561,7 @@ class SFTP extends EventEmitter {
     // read position manually
     let bytesRead = 0;
 
-    const flag = options.flag || 'r';
+    const flag = options.flag || "r";
 
     const read = () => {
       if (size === 0) {
@@ -559,26 +575,21 @@ class SFTP extends EventEmitter {
     const afterRead = (er, nbytes) => {
       let eof;
       if (er) {
-        eof = (er.code === STATUS_CODE.EOF);
+        eof = er.code === STATUS_CODE.EOF;
         if (!eof) {
-          return this.close(handle, () => {
-            return callback && callback(er);
-          });
+          return this.close(handle, () => callback && callback(er));
         }
       } else {
         eof = false;
       }
 
-      if (eof || (size === 0 && nbytes === 0))
-        return close();
+      if (eof || (size === 0 && nbytes === 0)) return close();
 
       bytesRead += nbytes;
       pos += nbytes;
       if (size !== 0) {
-        if (pos === size)
-          close();
-        else
-          read();
+        if (pos === size) close();
+        else read();
       } else {
         // Unknown size, just read until we don't get bytes.
         buffers.push(bufferSlice(buffer, 0, nbytes));
@@ -596,15 +607,13 @@ class SFTP extends EventEmitter {
           buffer = bufferSlice(buffer, 0, pos);
         }
 
-        if (encoding)
-          buffer = buffer.toString(encoding);
+        if (encoding) buffer = buffer.toString(encoding);
         return callback && callback(er, buffer);
       });
     };
 
     this.open(path, flag, 0o666, (er, handle_) => {
-      if (er)
-        return callback && callback(er);
+      if (er) return callback && callback(er);
       handle = handle_;
 
       const tryStat = (er, st) => {
@@ -638,41 +647,39 @@ class SFTP extends EventEmitter {
   }
   writeFile(path, data, options, callback_) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     let callback;
-    if (typeof callback_ === 'function') {
+    if (typeof callback_ === "function") {
       callback = callback_;
-    } else if (typeof options === 'function') {
+    } else if (typeof options === "function") {
       callback = options;
       options = undefined;
     }
 
-    if (typeof options === 'string')
-      options = { encoding: options, mode: 0o666, flag: 'w' };
-    else if (!options)
-      options = { encoding: 'utf8', mode: 0o666, flag: 'w' };
-    else if (typeof options !== 'object')
-      throw new TypeError('Bad arguments');
+    if (typeof options === "string")
+      options = { encoding: options, mode: 0o666, flag: "w" };
+    else if (!options) options = { encoding: "utf8", mode: 0o666, flag: "w" };
+    else if (typeof options !== "object") throw new TypeError("Bad arguments");
 
     if (options.encoding && !Buffer.isEncoding(options.encoding))
       throw new Error(`Unknown encoding: ${options.encoding}`);
 
-    const flag = options.flag || 'w';
+    const flag = options.flag || "w";
     this.open(path, flag, options.mode, (openErr, handle) => {
       if (openErr) {
         callback && callback(openErr);
       } else {
-        const buffer = (Buffer.isBuffer(data)
-                        ? data
-                        : Buffer.from('' + data, options.encoding || 'utf8'));
-        const position = (/a/.test(flag) ? null : 0);
+        const buffer = Buffer.isBuffer(data)
+          ? data
+          : Buffer.from(`${data}`, options.encoding || "utf8");
+        const position = /a/.test(flag) ? null : 0;
 
         // SFTPv3 does not support the notion of 'current position'
         // (null position), so we just attempt to append to the end of the file
         // instead
         if (position === null) {
-          const tryStat = (er, st) => {
+          const tryStat = (er, { size }) => {
             if (er) {
               // Try stat() for sftp servers that may not support fstat() for
               // whatever reason
@@ -686,7 +693,7 @@ class SFTP extends EventEmitter {
               });
               return;
             }
-            writeAll(this, handle, buffer, 0, buffer.length, st.size, callback);
+            writeAll(this, handle, buffer, 0, buffer.length, size, callback);
           };
           this.fstat(handle, tryStat);
           return;
@@ -697,30 +704,27 @@ class SFTP extends EventEmitter {
   }
   appendFile(path, data, options, callback_) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     let callback;
-    if (typeof callback_ === 'function') {
+    if (typeof callback_ === "function") {
       callback = callback_;
-    } else if (typeof options === 'function') {
+    } else if (typeof options === "function") {
       callback = options;
       options = undefined;
     }
 
-    if (typeof options === 'string')
-      options = { encoding: options, mode: 0o666, flag: 'a' };
-    else if (!options)
-      options = { encoding: 'utf8', mode: 0o666, flag: 'a' };
-    else if (typeof options !== 'object')
-      throw new TypeError('Bad arguments');
+    if (typeof options === "string")
+      options = { encoding: options, mode: 0o666, flag: "a" };
+    else if (!options) options = { encoding: "utf8", mode: 0o666, flag: "a" };
+    else if (typeof options !== "object") throw new TypeError("Bad arguments");
 
-    if (!options.flag)
-      options = Object.assign({ flag: 'a' }, options);
+    if (!options.flag) options = Object.assign({ flag: "a" }, options);
     this.writeFile(path, data, options, callback);
   }
   exists(path, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     this.stat(path, (err) => {
       cb && cb(err ? false : true);
@@ -728,7 +732,7 @@ class SFTP extends EventEmitter {
   }
   unlink(filename, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     /*
       uint32     id
@@ -740,22 +744,23 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.REMOVE;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, fnameLen, p);
-    buf.utf8Write(filename, p += 4, fnameLen);
+    (buf as any).utf8Write(filename, (p += 4), fnameLen);
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} REMOVE`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} REMOVE`
+      );
   }
   rename(oldPath, newPath, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     /*
       uint32     id
@@ -769,33 +774,34 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.RENAME;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, oldLen, p);
-    buf.utf8Write(oldPath, p += 4, oldLen);
-    writeUInt32BE(buf, newLen, p += oldLen);
-    buf.utf8Write(newPath, p += 4, newLen);
+    (buf as any).utf8Write(oldPath, (p += 4), oldLen);
+    writeUInt32BE(buf, newLen, (p += oldLen));
+    (buf as any).utf8Write(newPath, (p += 4), newLen);
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} RENAME`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} RENAME`
+      );
   }
   mkdir(path, attrs, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     let flags = 0;
     let attrsLen = 0;
 
-    if (typeof attrs === 'function') {
+    if (typeof attrs === "function") {
       cb = attrs;
       attrs = undefined;
     }
-    if (typeof attrs === 'object' && attrs !== null) {
+    if (typeof attrs === "object" && attrs !== null) {
       attrs = attrsToBytes(attrs);
       flags = attrs.flags;
       attrsLen = attrs.nb;
@@ -812,19 +818,17 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.MKDIR;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, pathLen, p);
-    buf.utf8Write(path, p += 4, pathLen);
-    writeUInt32BE(buf, flags, p += pathLen);
+    (buf as any).utf8Write(path, (p += 4), pathLen);
+    writeUInt32BE(buf, flags, (p += pathLen));
     if (attrsLen) {
       p += 4;
 
-      if (attrsLen === ATTRS_BUF.length)
-        buf.set(ATTRS_BUF, p);
-      else
-        bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
+      if (attrsLen === ATTRS_BUF.length) buf.set(ATTRS_BUF, p);
+      else bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
 
       p += attrsLen;
     }
@@ -832,13 +836,14 @@ class SFTP extends EventEmitter {
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} MKDIR`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} MKDIR`
+      );
   }
   rmdir(path, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     /*
       uint32     id
@@ -850,59 +855,56 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.RMDIR;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, pathLen, p);
-    buf.utf8Write(path, p += 4, pathLen);
+    (buf as any).utf8Write(path, (p += 4), pathLen);
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} RMDIR`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} RMDIR`
+      );
   }
   readdir(where, opts, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    if (typeof opts === 'function') {
+    if (typeof opts === "function") {
       cb = opts;
       opts = {};
     }
-    if (typeof opts !== 'object' || opts === null)
-      opts = {};
+    if (typeof opts !== "object" || opts === null) opts = {};
 
-    const doFilter = (opts && opts.full ? false : true);
+    const doFilter = opts && opts.full ? false : true;
 
-    if (!Buffer.isBuffer(where) && typeof where !== 'string')
-      throw new Error('missing directory handle or path');
+    if (!Buffer.isBuffer(where) && typeof where !== "string")
+      throw new Error("missing directory handle or path");
 
-    if (typeof where === 'string') {
+    if (typeof where === "string") {
       const entries = [];
       let e = 0;
 
       const reread = (err, handle) => {
-        if (err)
-          return cb(err);
+        if (err) return cb(err);
 
         this.readdir(handle, opts, (err, list) => {
-          const eof = (err && err.code === STATUS_CODE.EOF);
+          const eof = err && err.code === STATUS_CODE.EOF;
 
-          if (err && !eof)
-            return this.close(handle, () => cb(err));
+          if (err && !eof) return this.close(handle, () => cb(err));
 
           if (eof) {
             return this.close(handle, (err) => {
-              if (err)
-                return cb(err);
+              if (err) return cb(err);
               cb(undefined, entries);
             });
           }
 
-          for (let i = 0; i < list.length; ++i, ++e)
-            entries[e] = list[i];
+          // @ts-expect-error TS(2322): Type 'any' is not assignable to type 'never'.
+          for (let i = 0; i < list.length; ++i, ++e) entries[e] = list[i];
 
           reread(undefined, handle);
         });
@@ -920,41 +922,39 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.READDIR;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, handleLen, p);
-    buf.set(where, p += 4);
+    buf.set(where, (p += 4));
 
     this._requests[reqid] = {
-      cb: (doFilter
-           ? (err, list) => {
-               if (typeof cb !== 'function')
-                 return;
-               if (err)
-                 return cb(err);
+      cb: doFilter
+        ? (err, list) => {
+            if (typeof cb !== "function") return;
+            if (err) return cb(err);
 
-               for (let i = list.length - 1; i >= 0; --i) {
-                 if (list[i].filename === '.' || list[i].filename === '..')
-                   list.splice(i, 1);
-               }
+            for (let i = list.length - 1; i >= 0; --i) {
+              if (list[i].filename === "." || list[i].filename === "..")
+                list.splice(i, 1);
+            }
 
-               cb(undefined, list);
-             }
-           : cb)
+            cb(undefined, list);
+          }
+        : cb,
     };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} READDIR`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} READDIR`
+      );
   }
   fstat(handle, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    if (!Buffer.isBuffer(handle))
-      throw new Error('handle is not a Buffer');
+    if (!Buffer.isBuffer(handle)) throw new Error("handle is not a Buffer");
 
     /*
       uint32     id
@@ -966,22 +966,23 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.FSTAT;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, handleLen, p);
-    buf.set(handle, p += 4);
+    buf.set(handle, (p += 4));
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} FSTAT`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} FSTAT`
+      );
   }
   stat(path, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     /*
       uint32     id
@@ -993,22 +994,23 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.STAT;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, pathLen, p);
-    buf.utf8Write(path, p += 4, pathLen);
+    (buf as any).utf8Write(path, (p += 4), pathLen);
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} STAT`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} STAT`
+      );
   }
   lstat(path, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     /*
       uint32     id
@@ -1020,22 +1022,23 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.LSTAT;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, pathLen, p);
-    buf.utf8Write(path, p += 4, pathLen);
+    (buf as any).utf8Write(path, (p += 4), pathLen);
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} LSTAT`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} LSTAT`
+      );
   }
   opendir(path, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     /*
       uint32     id
@@ -1047,31 +1050,32 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.OPENDIR;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, pathLen, p);
-    buf.utf8Write(path, p += 4, pathLen);
+    (buf as any).utf8Write(path, (p += 4), pathLen);
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} OPENDIR`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} OPENDIR`
+      );
   }
   setstat(path, attrs, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     let flags = 0;
     let attrsLen = 0;
 
-    if (typeof attrs === 'object' && attrs !== null) {
+    if (typeof attrs === "object" && attrs !== null) {
       attrs = attrsToBytes(attrs);
       flags = attrs.flags;
       attrsLen = attrs.nb;
-    } else if (typeof attrs === 'function') {
+    } else if (typeof attrs === "function") {
       cb = attrs;
     }
 
@@ -1086,19 +1090,17 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.SETSTAT;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, pathLen, p);
-    buf.utf8Write(path, p += 4, pathLen);
-    writeUInt32BE(buf, flags, p += pathLen);
+    (buf as any).utf8Write(path, (p += 4), pathLen);
+    writeUInt32BE(buf, flags, (p += pathLen));
     if (attrsLen) {
       p += 4;
 
-      if (attrsLen === ATTRS_BUF.length)
-        buf.set(ATTRS_BUF, p);
-      else
-        bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
+      if (attrsLen === ATTRS_BUF.length) buf.set(ATTRS_BUF, p);
+      else bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
 
       p += attrsLen;
     }
@@ -1106,25 +1108,25 @@ class SFTP extends EventEmitter {
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} SETSTAT`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} SETSTAT`
+      );
   }
   fsetstat(handle, attrs, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    if (!Buffer.isBuffer(handle))
-      throw new Error('handle is not a Buffer');
+    if (!Buffer.isBuffer(handle)) throw new Error("handle is not a Buffer");
 
     let flags = 0;
     let attrsLen = 0;
 
-    if (typeof attrs === 'object' && attrs !== null) {
+    if (typeof attrs === "object" && attrs !== null) {
       attrs = attrsToBytes(attrs);
       flags = attrs.flags;
       attrsLen = attrs.nb;
-    } else if (typeof attrs === 'function') {
+    } else if (typeof attrs === "function") {
       cb = attrs;
     }
 
@@ -1139,19 +1141,17 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.FSETSTAT;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, handleLen, p);
-    buf.set(handle, p += 4);
-    writeUInt32BE(buf, flags, p += handleLen);
+    buf.set(handle, (p += 4));
+    writeUInt32BE(buf, flags, (p += handleLen));
     if (attrsLen) {
       p += 4;
 
-      if (attrsLen === ATTRS_BUF.length)
-        buf.set(ATTRS_BUF, p);
-      else
-        bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
+      if (attrsLen === ATTRS_BUF.length) buf.set(ATTRS_BUF, p);
+      else bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
 
       p += attrsLen;
     }
@@ -1159,47 +1159,72 @@ class SFTP extends EventEmitter {
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} FSETSTAT`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} FSETSTAT`
+      );
   }
   futimes(handle, atime, mtime, cb) {
-    return this.fsetstat(handle, {
-      atime: toUnixTimestamp(atime),
-      mtime: toUnixTimestamp(mtime)
-    }, cb);
+    return this.fsetstat(
+      handle,
+      {
+        atime: toUnixTimestamp(atime),
+        mtime: toUnixTimestamp(mtime),
+      },
+      cb
+    );
   }
   utimes(path, atime, mtime, cb) {
-    return this.setstat(path, {
-      atime: toUnixTimestamp(atime),
-      mtime: toUnixTimestamp(mtime)
-    }, cb);
+    return this.setstat(
+      path,
+      {
+        atime: toUnixTimestamp(atime),
+        mtime: toUnixTimestamp(mtime),
+      },
+      cb
+    );
   }
   fchown(handle, uid, gid, cb) {
-    return this.fsetstat(handle, {
-      uid: uid,
-      gid: gid
-    }, cb);
+    return this.fsetstat(
+      handle,
+      {
+        uid,
+        gid,
+      },
+      cb
+    );
   }
   chown(path, uid, gid, cb) {
-    return this.setstat(path, {
-      uid: uid,
-      gid: gid
-    }, cb);
+    return this.setstat(
+      path,
+      {
+        uid,
+        gid,
+      },
+      cb
+    );
   }
   fchmod(handle, mode, cb) {
-    return this.fsetstat(handle, {
-      mode: mode
-    }, cb);
+    return this.fsetstat(
+      handle,
+      {
+        mode,
+      },
+      cb
+    );
   }
   chmod(path, mode, cb) {
-    return this.setstat(path, {
-      mode: mode
-    }, cb);
+    return this.setstat(
+      path,
+      {
+        mode,
+      },
+      cb
+    );
   }
   readlink(path, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     /*
       uint32     id
@@ -1211,32 +1236,31 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.READLINK;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, pathLen, p);
-    buf.utf8Write(path, p += 4, pathLen);
+    (buf as any).utf8Write(path, (p += 4), pathLen);
 
     this._requests[reqid] = {
       cb: (err, names) => {
-        if (typeof cb !== 'function')
-          return;
-        if (err)
-          return cb(err);
+        if (typeof cb !== "function") return;
+        if (err) return cb(err);
         if (!names || !names.length)
-          return cb(new Error('Response missing link info'));
+          return cb(new Error("Response missing link info"));
         cb(undefined, names[0].filename);
-      }
+      },
     };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} READLINK`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} READLINK`
+      );
   }
   symlink(targetPath, linkPath, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     /*
       uint32     id
@@ -1250,32 +1274,33 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.SYMLINK;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     if (this._isOpenSSH) {
       // OpenSSH has linkpath and targetpath positions switched
       writeUInt32BE(buf, targetLen, p);
-      buf.utf8Write(targetPath, p += 4, targetLen);
-      writeUInt32BE(buf, linkLen, p += targetLen);
-      buf.utf8Write(linkPath, p += 4, linkLen);
+      (buf as any).utf8Write(targetPath, (p += 4), targetLen);
+      writeUInt32BE(buf, linkLen, (p += targetLen));
+      (buf as any).utf8Write(linkPath, (p += 4), linkLen);
     } else {
       writeUInt32BE(buf, linkLen, p);
-      buf.utf8Write(linkPath, p += 4, linkLen);
-      writeUInt32BE(buf, targetLen, p += linkLen);
-      buf.utf8Write(targetPath, p += 4, targetLen);
+      (buf as any).utf8Write(linkPath, (p += 4), linkLen);
+      writeUInt32BE(buf, targetLen, (p += linkLen));
+      (buf as any).utf8Write(targetPath, (p += 4), targetLen);
     }
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} SYMLINK`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} SYMLINK`
+      );
   }
   realpath(path, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
     /*
       uint32     id
@@ -1287,37 +1312,36 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.REALPATH;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, pathLen, p);
-    buf.utf8Write(path, p += 4, pathLen);
+    (buf as any).utf8Write(path, (p += 4), pathLen);
 
     this._requests[reqid] = {
       cb: (err, names) => {
-        if (typeof cb !== 'function')
-          return;
-        if (err)
-          return cb(err);
+        if (typeof cb !== "function") return;
+        if (err) return cb(err);
         if (!names || !names.length)
-          return cb(new Error('Response missing path info'));
+          return cb(new Error("Response missing path info"));
         cb(undefined, names[0].filename);
-      }
+      },
     };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} REALPATH`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} REALPATH`
+      );
   }
   // extended requests
   ext_openssh_rename(oldPath, newPath, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    const ext = this._extensions['posix-rename@openssh.com'];
-    if (!ext || ext !== '1')
-      throw new Error('Server does not support this extended request');
+    const ext = this._extensions["posix-rename@openssh.com"];
+    if (!ext || ext !== "1")
+      throw new Error("Server does not support this extended request");
 
     /*
       uint32    id
@@ -1328,36 +1352,37 @@ class SFTP extends EventEmitter {
     const oldLen = Buffer.byteLength(oldPath);
     const newLen = Buffer.byteLength(newPath);
     let p = 9;
-    const buf =
-      Buffer.allocUnsafe(4 + 1 + 4 + 4 + 24 + 4 + oldLen + 4 + newLen);
+    const buf = Buffer.allocUnsafe(
+      4 + 1 + 4 + 4 + 24 + 4 + oldLen + 4 + newLen
+    );
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.EXTENDED;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, 24, p);
-    buf.utf8Write('posix-rename@openssh.com', p += 4, 24);
-    writeUInt32BE(buf, oldLen, p += 24);
-    buf.utf8Write(oldPath, p += 4, oldLen);
-    writeUInt32BE(buf, newLen, p += oldLen);
-    buf.utf8Write(newPath, p += 4, newLen);
+    (buf as any).utf8Write("posix-rename@openssh.com", (p += 4), 24);
+    writeUInt32BE(buf, oldLen, (p += 24));
+    (buf as any).utf8Write(oldPath, (p += 4), oldLen);
+    writeUInt32BE(buf, newLen, (p += oldLen));
+    (buf as any).utf8Write(newPath, (p += 4), newLen);
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
     if (this._debug) {
-      const which = (isBuffered ? 'Buffered' : 'Sending');
+      const which = isBuffered ? "Buffered" : "Sending";
       this._debug(`SFTP: Outbound: ${which} posix-rename@openssh.com`);
     }
   }
   ext_openssh_statvfs(path, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    const ext = this._extensions['statvfs@openssh.com'];
-    if (!ext || ext !== '2')
-      throw new Error('Server does not support this extended request');
+    const ext = this._extensions["statvfs@openssh.com"];
+    if (!ext || ext !== "2")
+      throw new Error("Server does not support this extended request");
 
     /*
       uint32    id
@@ -1370,31 +1395,30 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.EXTENDED;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, 19, p);
-    buf.utf8Write('statvfs@openssh.com', p += 4, 19);
-    writeUInt32BE(buf, pathLen, p += 19);
-    buf.utf8Write(path, p += 4, pathLen);
+    (buf as any).utf8Write("statvfs@openssh.com", (p += 4), 19);
+    writeUInt32BE(buf, pathLen, (p += 19));
+    (buf as any).utf8Write(path, (p += 4), pathLen);
 
-    this._requests[reqid] = { extended: 'statvfs@openssh.com', cb };
+    this._requests[reqid] = { extended: "statvfs@openssh.com", cb };
 
     const isBuffered = sendOrBuffer(this, buf);
     if (this._debug) {
-      const which = (isBuffered ? 'Buffered' : 'Sending');
+      const which = isBuffered ? "Buffered" : "Sending";
       this._debug(`SFTP: Outbound: ${which} statvfs@openssh.com`);
     }
   }
   ext_openssh_fstatvfs(handle, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    const ext = this._extensions['fstatvfs@openssh.com'];
-    if (!ext || ext !== '2')
-      throw new Error('Server does not support this extended request');
-    if (!Buffer.isBuffer(handle))
-      throw new Error('handle is not a Buffer');
+    const ext = this._extensions["fstatvfs@openssh.com"];
+    if (!ext || ext !== "2")
+      throw new Error("Server does not support this extended request");
+    if (!Buffer.isBuffer(handle)) throw new Error("handle is not a Buffer");
 
     /*
       uint32    id
@@ -1407,29 +1431,29 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.EXTENDED;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, 20, p);
-    buf.utf8Write('fstatvfs@openssh.com', p += 4, 20);
-    writeUInt32BE(buf, handleLen, p += 20);
-    buf.set(handle, p += 4);
+    (buf as any).utf8Write("fstatvfs@openssh.com", (p += 4), 20);
+    writeUInt32BE(buf, handleLen, (p += 20));
+    buf.set(handle, (p += 4));
 
-    this._requests[reqid] = { extended: 'fstatvfs@openssh.com', cb };
+    this._requests[reqid] = { extended: "fstatvfs@openssh.com", cb };
 
     const isBuffered = sendOrBuffer(this, buf);
     if (this._debug) {
-      const which = (isBuffered ? 'Buffered' : 'Sending');
+      const which = isBuffered ? "Buffered" : "Sending";
       this._debug(`SFTP: Outbound: ${which} fstatvfs@openssh.com`);
     }
   }
   ext_openssh_hardlink(oldPath, newPath, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    const ext = this._extensions['hardlink@openssh.com'];
-    if (ext !== '1')
-      throw new Error('Server does not support this extended request');
+    const ext = this._extensions["hardlink@openssh.com"];
+    if (ext !== "1")
+      throw new Error("Server does not support this extended request");
 
     /*
       uint32    id
@@ -1440,38 +1464,38 @@ class SFTP extends EventEmitter {
     const oldLen = Buffer.byteLength(oldPath);
     const newLen = Buffer.byteLength(newPath);
     let p = 9;
-    const buf =
-      Buffer.allocUnsafe(4 + 1 + 4 + 4 + 20 + 4 + oldLen + 4 + newLen);
+    const buf = Buffer.allocUnsafe(
+      4 + 1 + 4 + 4 + 20 + 4 + oldLen + 4 + newLen
+    );
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.EXTENDED;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, 20, p);
-    buf.utf8Write('hardlink@openssh.com', p += 4, 20);
-    writeUInt32BE(buf, oldLen, p += 20);
-    buf.utf8Write(oldPath, p += 4, oldLen);
-    writeUInt32BE(buf, newLen, p += oldLen);
-    buf.utf8Write(newPath, p += 4, newLen);
+    (buf as any).utf8Write("hardlink@openssh.com", (p += 4), 20);
+    writeUInt32BE(buf, oldLen, (p += 20));
+    (buf as any).utf8Write(oldPath, (p += 4), oldLen);
+    writeUInt32BE(buf, newLen, (p += oldLen));
+    (buf as any).utf8Write(newPath, (p += 4), newLen);
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
     if (this._debug) {
-      const which = (isBuffered ? 'Buffered' : 'Sending');
+      const which = isBuffered ? "Buffered" : "Sending";
       this._debug(`SFTP: Outbound: ${which} hardlink@openssh.com`);
     }
   }
   ext_openssh_fsync(handle, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    const ext = this._extensions['fsync@openssh.com'];
-    if (ext !== '1')
-      throw new Error('Server does not support this extended request');
-    if (!Buffer.isBuffer(handle))
-      throw new Error('handle is not a Buffer');
+    const ext = this._extensions["fsync@openssh.com"];
+    if (ext !== "1")
+      throw new Error("Server does not support this extended request");
+    if (!Buffer.isBuffer(handle)) throw new Error("handle is not a Buffer");
 
     /*
       uint32    id
@@ -1484,37 +1508,40 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.EXTENDED;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, 17, p);
-    buf.utf8Write('fsync@openssh.com', p += 4, 17);
-    writeUInt32BE(buf, handleLen, p += 17);
-    buf.set(handle, p += 4);
+    (buf as any).utf8Write("fsync@openssh.com", (p += 4), 17);
+    writeUInt32BE(buf, handleLen, (p += 17));
+    buf.set(handle, (p += 4));
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} fsync@openssh.com`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${
+          isBuffered ? "Buffered" : "Sending"
+        } fsync@openssh.com`
+      );
   }
   ext_openssh_lsetstat(path, attrs, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    const ext = this._extensions['lsetstat@openssh.com'];
-    if (ext !== '1')
-      throw new Error('Server does not support this extended request');
+    const ext = this._extensions["lsetstat@openssh.com"];
+    if (ext !== "1")
+      throw new Error("Server does not support this extended request");
 
     let flags = 0;
     let attrsLen = 0;
 
-    if (typeof attrs === 'object' && attrs !== null) {
+    if (typeof attrs === "object" && attrs !== null) {
       attrs = attrsToBytes(attrs);
       flags = attrs.flags;
       attrsLen = attrs.nb;
-    } else if (typeof attrs === 'function') {
+    } else if (typeof attrs === "function") {
       cb = attrs;
     }
 
@@ -1526,28 +1553,27 @@ class SFTP extends EventEmitter {
     */
     const pathLen = Buffer.byteLength(path);
     let p = 9;
-    const buf =
-      Buffer.allocUnsafe(4 + 1 + 4 + 4 + 20 + 4 + pathLen + 4 + attrsLen);
+    const buf = Buffer.allocUnsafe(
+      4 + 1 + 4 + 4 + 20 + 4 + pathLen + 4 + attrsLen
+    );
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.EXTENDED;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, 20, p);
-    buf.utf8Write('lsetstat@openssh.com', p += 4, 20);
+    (buf as any).utf8Write("lsetstat@openssh.com", (p += 4), 20);
 
-    writeUInt32BE(buf, pathLen, p += 20);
-    buf.utf8Write(path, p += 4, pathLen);
+    writeUInt32BE(buf, pathLen, (p += 20));
+    (buf as any).utf8Write(path, (p += 4), pathLen);
 
-    writeUInt32BE(buf, flags, p += pathLen);
+    writeUInt32BE(buf, flags, (p += pathLen));
     if (attrsLen) {
       p += 4;
 
-      if (attrsLen === ATTRS_BUF.length)
-        buf.set(ATTRS_BUF, p);
-      else
-        bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
+      if (attrsLen === ATTRS_BUF.length) buf.set(ATTRS_BUF, p);
+      else bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
 
       p += attrsLen;
     }
@@ -1556,17 +1582,17 @@ class SFTP extends EventEmitter {
 
     const isBuffered = sendOrBuffer(this, buf);
     if (this._debug) {
-      const status = (isBuffered ? 'Buffered' : 'Sending');
+      const status = isBuffered ? "Buffered" : "Sending";
       this._debug(`SFTP: Outbound: ${status} lsetstat@openssh.com`);
     }
   }
   ext_openssh_expandPath(path, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    const ext = this._extensions['expand-path@openssh.com'];
-    if (ext !== '1')
-      throw new Error('Server does not support this extended request');
+    const ext = this._extensions["expand-path@openssh.com"];
+    if (ext !== "1")
+      throw new Error("Server does not support this extended request");
 
     /*
       uint32    id
@@ -1579,36 +1605,36 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, buf.length - 4, 0);
     buf[4] = REQUEST.EXTENDED;
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, 23, p);
-    buf.utf8Write('expand-path@openssh.com', p += 4, 23);
+    (buf as any).utf8Write("expand-path@openssh.com", (p += 4), 23);
 
-    writeUInt32BE(buf, pathLen, p += 20);
-    buf.utf8Write(path, p += 4, pathLen);
+    writeUInt32BE(buf, pathLen, (p += 20));
+    (buf as any).utf8Write(path, (p += 4), pathLen);
 
     this._requests[reqid] = { cb };
 
     const isBuffered = sendOrBuffer(this, buf);
     if (this._debug) {
-      const status = (isBuffered ? 'Buffered' : 'Sending');
+      const status = isBuffered ? "Buffered" : "Sending";
       this._debug(`SFTP: Outbound: ${status} expand-path@openssh.com`);
     }
   }
   ext_copy_data(srcHandle, srcOffset, len, dstHandle, dstOffset, cb) {
     if (this.server)
-      throw new Error('Client-only method called in server mode');
+      throw new Error("Client-only method called in server mode");
 
-    const ext = this._extensions['copy-data'];
-    if (ext !== '1')
-      throw new Error('Server does not support this extended request');
+    const ext = this._extensions["copy-data"];
+    if (ext !== "1")
+      throw new Error("Server does not support this extended request");
 
     if (!Buffer.isBuffer(srcHandle))
-      throw new Error('Source handle is not a Buffer');
+      throw new Error("Source handle is not a Buffer");
 
     if (!Buffer.isBuffer(dstHandle))
-      throw new Error('Destination handle is not a Buffer');
+      throw new Error("Destination handle is not a Buffer");
 
     /*
       uint32    id
@@ -1621,14 +1647,18 @@ class SFTP extends EventEmitter {
     */
     let p = 0;
     const buf = Buffer.allocUnsafe(
-      4 + 1
-      + 4
-      + 4 + 9
-      + 4 + srcHandle.length
-      + 8
-      + 8
-      + 4 + dstHandle.length
-      + 8
+      4 +
+        1 +
+        4 +
+        4 +
+        9 +
+        4 +
+        srcHandle.length +
+        8 +
+        8 +
+        4 +
+        dstHandle.length +
+        8
     );
 
     writeUInt32BE(buf, buf.length - 4, p);
@@ -1637,13 +1667,13 @@ class SFTP extends EventEmitter {
     buf[p] = REQUEST.EXTENDED;
     ++p;
 
-    const reqid = this._writeReqid = (this._writeReqid + 1) & MAX_REQID;
+    const reqid = (this._writeReqid = (this._writeReqid + 1) & MAX_REQID);
     writeUInt32BE(buf, reqid, p);
     p += 4;
 
     writeUInt32BE(buf, 9, p);
     p += 4;
-    buf.utf8Write('copy-data', p, 9);
+    (buf as any).utf8Write("copy-data", p, 9);
     p += 9;
 
     writeUInt32BE(buf, srcHandle.length, p);
@@ -1652,13 +1682,13 @@ class SFTP extends EventEmitter {
     p += srcHandle.length;
 
     for (let i = 7; i >= 0; --i) {
-      buf[p + i] = srcOffset & 0xFF;
+      buf[p + i] = srcOffset & 0xff;
       srcOffset /= 256;
     }
     p += 8;
 
     for (let i = 7; i >= 0; --i) {
-      buf[p + i] = len & 0xFF;
+      buf[p + i] = len & 0xff;
       len /= 256;
     }
     p += 8;
@@ -1669,7 +1699,7 @@ class SFTP extends EventEmitter {
     p += dstHandle.length;
 
     for (let i = 7; i >= 0; --i) {
-      buf[p + i] = dstOffset & 0xFF;
+      buf[p + i] = dstOffset & 0xff;
       dstOffset /= 256;
     }
 
@@ -1677,7 +1707,7 @@ class SFTP extends EventEmitter {
 
     const isBuffered = sendOrBuffer(this, buf);
     if (this._debug) {
-      const status = (isBuffered ? 'Buffered' : 'Sending');
+      const status = isBuffered ? "Buffered" : "Sending";
       this._debug(`SFTP: Outbound: ${status} copy-data`);
     }
   }
@@ -1686,15 +1716,13 @@ class SFTP extends EventEmitter {
   // ===========================================================================
   handle(reqid, handle) {
     if (!this.server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
-    if (!Buffer.isBuffer(handle))
-      throw new Error('handle is not a Buffer');
+    if (!Buffer.isBuffer(handle)) throw new Error("handle is not a Buffer");
 
     const handleLen = handle.length;
 
-    if (handleLen > 256)
-      throw new Error('handle too large (> 256 bytes)');
+    if (handleLen > 256) throw new Error("handle too large (> 256 bytes)");
 
     let p = 9;
     const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + handleLen);
@@ -1704,22 +1732,22 @@ class SFTP extends EventEmitter {
     writeUInt32BE(buf, reqid, 5);
 
     writeUInt32BE(buf, handleLen, p);
-    if (handleLen)
-      buf.set(handle, p += 4);
+    if (handleLen) buf.set(handle, (p += 4));
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} HANDLE`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} HANDLE`
+      );
   }
   status(reqid, code, message) {
     if (!this.server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
     if (!VALID_STATUS_CODES.has(code))
       throw new Error(`Bad status code: ${code}`);
 
-    message || (message = '');
+    message || (message = "");
 
     const msgLen = Buffer.byteLength(message);
     let p = 9;
@@ -1731,28 +1759,29 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, code, p);
 
-    writeUInt32BE(buf, msgLen, p += 4);
+    writeUInt32BE(buf, msgLen, (p += 4));
     p += 4;
     if (msgLen) {
-      buf.utf8Write(message, p, msgLen);
+      (buf as any).utf8Write(message, p, msgLen);
       p += msgLen;
     }
 
     writeUInt32BE(buf, 0, p); // Empty language tag
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} STATUS`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} STATUS`
+      );
   }
   data(reqid, data, encoding) {
     if (!this.server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
     const isBuffer = Buffer.isBuffer(data);
 
-    if (!isBuffer && typeof data !== 'string')
-      throw new Error('data is not a Buffer or string');
+    if (!isBuffer && typeof data !== "string")
+      throw new Error("data is not a Buffer or string");
 
     let isUTF8;
     if (!isBuffer && !encoding) {
@@ -1760,11 +1789,7 @@ class SFTP extends EventEmitter {
       isUTF8 = true;
     }
 
-    const dataLen = (
-      isBuffer
-      ? data.length
-      : Buffer.byteLength(data, encoding)
-    );
+    const dataLen = isBuffer ? data.length : Buffer.byteLength(data, encoding);
     let p = 9;
     const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + dataLen);
 
@@ -1774,27 +1799,25 @@ class SFTP extends EventEmitter {
 
     writeUInt32BE(buf, dataLen, p);
     if (dataLen) {
-      if (isBuffer)
-        buf.set(data, p += 4);
-      else if (isUTF8)
-        buf.utf8Write(data, p += 4, dataLen);
-      else
-        buf.write(data, p += 4, dataLen, encoding);
+      if (isBuffer) buf.set(data, (p += 4));
+      else if (isUTF8) (buf as any).utf8Write(data, (p += 4), dataLen);
+      else buf.write(data, (p += 4), dataLen, encoding);
     }
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} DATA`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} DATA`
+      );
   }
   name(reqid, names) {
     if (!this.server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
     if (!Array.isArray(names)) {
-      if (typeof names !== 'object' || names === null)
-        throw new Error('names is not an object or array');
-      names = [ names ];
+      if (typeof names !== "object" || names === null)
+        throw new Error("names is not an object or array");
+      names = [names];
     }
 
     const count = names.length;
@@ -1804,20 +1827,18 @@ class SFTP extends EventEmitter {
 
     for (let i = 0; i < count; ++i) {
       const name = names[i];
-      const filename = (
-        !name || !name.filename || typeof name.filename !== 'string'
-        ? ''
-        : name.filename
-      );
+      const filename =
+        !name || !name.filename || typeof name.filename !== "string"
+          ? ""
+          : name.filename;
       namesLen += 4 + Buffer.byteLength(filename);
-      const longname = (
-        !name || !name.longname || typeof name.longname !== 'string'
-        ? ''
-        : name.longname
-      );
+      const longname =
+        !name || !name.longname || typeof name.longname !== "string"
+          ? ""
+          : name.longname;
       namesLen += 4 + Buffer.byteLength(longname);
 
-      if (typeof name.attrs === 'object' && name.attrs !== null) {
+      if (typeof name.attrs === "object" && name.attrs !== null) {
         nameAttrs = attrsToBytes(name.attrs);
         namesLen += 4 + nameAttrs.nb;
 
@@ -1834,9 +1855,11 @@ class SFTP extends EventEmitter {
           nameAttrs.bytes = bytes;
         }
 
+        // @ts-expect-error TS(2345): Argument of type 'any' is not assignable to parame... Remove this comment to see the full error message
         attrs.push(nameAttrs);
       } else {
         namesLen += 4;
+        // @ts-expect-error TS(2345): Argument of type 'null' is not assignable to param... Remove this comment to see the full error message
         attrs.push(null);
       }
     }
@@ -1856,42 +1879,40 @@ class SFTP extends EventEmitter {
       const name = names[i];
 
       {
-        const filename = (
-          !name || !name.filename || typeof name.filename !== 'string'
-          ? ''
-          : name.filename
-        );
+        const filename =
+          !name || !name.filename || typeof name.filename !== "string"
+            ? ""
+            : name.filename;
         const len = Buffer.byteLength(filename);
         writeUInt32BE(buf, len, p);
         p += 4;
         if (len) {
-          buf.utf8Write(filename, p, len);
+          (buf as any).utf8Write(filename, p, len);
           p += len;
         }
       }
 
       {
-        const longname = (
-          !name || !name.longname || typeof name.longname !== 'string'
-          ? ''
-          : name.longname
-        );
+        const longname =
+          !name || !name.longname || typeof name.longname !== "string"
+            ? ""
+            : name.longname;
         const len = Buffer.byteLength(longname);
         writeUInt32BE(buf, len, p);
         p += 4;
         if (len) {
-          buf.utf8Write(longname, p, len);
+          (buf as any).utf8Write(longname, p, len);
           p += len;
         }
       }
 
       const attr = attrs[i];
       if (attr) {
-        writeUInt32BE(buf, attr.flags, p);
+        writeUInt32BE(buf, (attr as any).flags, p);
         p += 4;
-        if (attr.flags && attr.bytes) {
-          buf.set(attr.bytes, p);
-          p += attr.nb;
+        if ((attr as any).flags && (attr as any).bytes) {
+          buf.set((attr as any).bytes, p);
+          p += (attr as any).nb;
         }
       } else {
         writeUInt32BE(buf, 0, p);
@@ -1900,16 +1921,17 @@ class SFTP extends EventEmitter {
     }
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} NAME`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} NAME`
+      );
   }
   attrs(reqid, attrs) {
     if (!this.server)
-      throw new Error('Server-only method called in client mode');
+      throw new Error("Server-only method called in client mode");
 
-    if (typeof attrs !== 'object' || attrs === null)
-      throw new Error('attrs is not an object');
+    if (typeof attrs !== "object" || attrs === null)
+      throw new Error("attrs is not an object");
 
     attrs = attrsToBytes(attrs);
     const flags = attrs.flags;
@@ -1925,18 +1947,17 @@ class SFTP extends EventEmitter {
     if (attrsLen) {
       p += 4;
 
-      if (attrsLen === ATTRS_BUF.length)
-        buf.set(ATTRS_BUF, p);
-      else
-        bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
+      if (attrsLen === ATTRS_BUF.length) buf.set(ATTRS_BUF, p);
+      else bufferCopy(ATTRS_BUF, buf, 0, attrsLen, p);
 
       p += attrsLen;
     }
 
     const isBuffered = sendOrBuffer(this, buf);
-    this._debug && this._debug(
-      `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} ATTRS`
-    );
+    this._debug &&
+      this._debug(
+        `SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} ATTRS`
+      );
   }
 }
 
@@ -1952,8 +1973,7 @@ function read_(self, handle, buf, off, len, position, cb, req_) {
   const maxDataLen = self._maxReadLen;
   const overflow = Math.max(len - maxDataLen, 0);
 
-  if (overflow)
-    len = maxDataLen;
+  if (overflow) len = maxDataLen;
 
   /*
     uint32     id
@@ -1968,22 +1988,21 @@ function read_(self, handle, buf, off, len, position, cb, req_) {
 
   writeUInt32BE(out, out.length - 4, 0);
   out[4] = REQUEST.READ;
-  const reqid = self._writeReqid = (self._writeReqid + 1) & MAX_REQID;
+  const reqid = (self._writeReqid = (self._writeReqid + 1) & MAX_REQID);
   writeUInt32BE(out, reqid, 5);
 
   writeUInt32BE(out, handleLen, p);
-  out.set(handle, p += 4);
+  out.set(handle, (p += 4));
   p += handleLen;
   for (let i = 7; i >= 0; --i) {
-    out[p + i] = pos & 0xFF;
+    out[p + i] = pos & 0xff;
     pos /= 256;
   }
-  writeUInt32BE(out, len, p += 8);
+  writeUInt32BE(out, len, (p += 8));
 
-  if (typeof cb !== 'function')
-    cb = noop;
+  if (typeof cb !== "function") cb = noop;
 
-  const req = (req_ || {
+  const req = req_ || {
     nb: 0,
     position,
     off,
@@ -1995,10 +2014,9 @@ function read_(self, handle, buf, off, len, position, cb, req_) {
       const overflow = req.overflow;
 
       if (err) {
-        if (cb._wantEOFError || err.code !== STATUS_CODE.EOF)
-          return cb(err);
+        if (cb._wantEOFError || err.code !== STATUS_CODE.EOF) return cb(err);
       } else if (nb > len) {
-        return cb(new Error('Received more data than requested'));
+        return cb(new Error("Received more data than requested"));
       } else if (nb === len && overflow) {
         req.nb += nb;
         req.position += nb;
@@ -2007,15 +2025,13 @@ function read_(self, handle, buf, off, len, position, cb, req_) {
         return;
       }
 
-      nb = (nb || 0);
-      if (req.origOff === 0 && buf.length === req.nb)
-        data = buf;
-      else
-        data = bufferSlice(buf, req.origOff, req.origOff + req.nb + nb);
+      nb = nb || 0;
+      if (req.origOff === 0 && buf.length === req.nb) data = buf;
+      else data = bufferSlice(buf, req.origOff, req.origOff + req.nb + nb);
       cb(undefined, req.nb + nb, data, req.position);
     },
     buffer: undefined,
-  });
+  };
 
   req.len = len;
   req.overflow = overflow;
@@ -2027,9 +2043,8 @@ function read_(self, handle, buf, off, len, position, cb, req_) {
   self._requests[reqid] = req;
 
   const isBuffered = sendOrBuffer(self, out);
-  self._debug && self._debug(
-    `SFTP: Outbound: ${isBuffered ? 'Buffered' : 'Sending'} READ`
-  );
+  self._debug &&
+    self._debug(`SFTP: Outbound: ${isBuffered ? "Buffered" : "Sending"} READ`);
 }
 
 function fastXfer(src, dst, srcPath, dstPath, opts, cb) {
@@ -2039,28 +2054,33 @@ function fastXfer(src, dst, srcPath, dstPath, opts, cb) {
   let mode;
   let fileSize;
 
-  if (typeof opts === 'function') {
+  if (typeof opts === "function") {
     cb = opts;
-  } else if (typeof opts === 'object' && opts !== null) {
-    if (typeof opts.concurrency === 'number'
-        && opts.concurrency > 0
-        && !isNaN(opts.concurrency)) {
+  } else if (typeof opts === "object" && opts !== null) {
+    if (
+      typeof opts.concurrency === "number" &&
+      opts.concurrency > 0 &&
+      !isNaN(opts.concurrency)
+    ) {
       concurrency = opts.concurrency;
     }
-    if (typeof opts.chunkSize === 'number'
-        && opts.chunkSize > 0
-        && !isNaN(opts.chunkSize)) {
+    if (
+      typeof opts.chunkSize === "number" &&
+      opts.chunkSize > 0 &&
+      !isNaN(opts.chunkSize)
+    ) {
       chunkSize = opts.chunkSize;
     }
-    if (typeof opts.fileSize === 'number'
-        && opts.fileSize > 0
-        && !isNaN(opts.fileSize)) {
+    if (
+      typeof opts.fileSize === "number" &&
+      opts.fileSize > 0 &&
+      !isNaN(opts.fileSize)
+    ) {
       fileSize = opts.fileSize;
     }
-    if (typeof opts.step === 'function')
-      onstep = opts.step;
+    if (typeof opts.step === "function") onstep = opts.step;
 
-    if (typeof opts.mode === 'string' || typeof opts.mode === 'number')
+    if (typeof opts.mode === "string" || typeof opts.mode === "number")
       mode = modeNum(opts.mode);
   }
 
@@ -2075,8 +2095,7 @@ function fastXfer(src, dst, srcPath, dstPath, opts, cb) {
   let bufsize = chunkSize * concurrency;
 
   function onerror(err) {
-    if (hadError)
-      return;
+    if (hadError) return;
 
     hadError = true;
 
@@ -2085,57 +2104,49 @@ function fastXfer(src, dst, srcPath, dstPath, opts, cb) {
 
     if (srcHandle || dstHandle) {
       cbfinal = () => {
-        if (--left === 0)
-          cb(err);
+        if (--left === 0) cb(err);
       };
-      if (srcHandle && (src === fs || src.outgoing.state === 'open'))
-        ++left;
-      if (dstHandle && (dst === fs || dst.outgoing.state === 'open'))
-        ++left;
-      if (srcHandle && (src === fs || src.outgoing.state === 'open'))
+      if (srcHandle && (src === fs || src.outgoing.state === "open")) ++left;
+      if (dstHandle && (dst === fs || dst.outgoing.state === "open")) ++left;
+      if (srcHandle && (src === fs || src.outgoing.state === "open"))
         src.close(srcHandle, cbfinal);
-      if (dstHandle && (dst === fs || dst.outgoing.state === 'open'))
+      if (dstHandle && (dst === fs || dst.outgoing.state === "open"))
         dst.close(dstHandle, cbfinal);
     } else {
       cb(err);
     }
   }
 
-  src.open(srcPath, 'r', (err, sourceHandle) => {
-    if (err)
-      return onerror(err);
+  src.open(srcPath, "r", (err, sourceHandle) => {
+    if (err) return onerror(err);
 
     srcHandle = sourceHandle;
 
-    if (fileSize === undefined)
-      src.fstat(srcHandle, tryStat);
-    else
-      tryStat(null, { size: fileSize });
+    if (fileSize === undefined) src.fstat(srcHandle, tryStat);
+    else tryStat(null, { size: fileSize });
 
-    function tryStat(err, attrs) {
+    function tryStat(err, { size }) {
       if (err) {
         if (src !== fs) {
           // Try stat() for sftp servers that may not support fstat() for
           // whatever reason
           src.stat(srcPath, (err_, attrs_) => {
-            if (err_)
-              return onerror(err);
+            if (err_) return onerror(err);
             tryStat(null, attrs_);
           });
           return;
         }
         return onerror(err);
       }
-      fsize = attrs.size;
+      fsize = size;
 
-      dst.open(dstPath, 'w', (err, destHandle) => {
-        if (err)
-          return onerror(err);
+      dst.open(dstPath, "w", (err, destHandle) => {
+        if (err) return onerror(err);
 
         dstHandle = destHandle;
 
-        if (fsize <= 0)
-          return onerror();
+        // @ts-expect-error TS(2554): Expected 1 arguments, but got 0.
+        if (fsize <= 0) return onerror();
 
         // Use less memory where possible
         while (bufsize > fsize) {
@@ -2148,14 +2159,14 @@ function fastXfer(src, dst, srcPath, dstPath, opts, cb) {
         }
 
         readbuf = tryCreateBuffer(bufsize);
-        if (readbuf instanceof Error)
-          return onerror(readbuf);
+        if (readbuf instanceof Error) return onerror(readbuf);
 
         if (mode !== undefined) {
           dst.fchmod(dstHandle, mode, function tryAgain(err) {
             if (err) {
               // Try chmod() for sftp servers that may not support fchmod()
               // for whatever reason
+              // @ts-expect-error TS(2554): Expected 1 arguments, but got 0.
               dst.chmod(dstPath, mode, (err_) => tryAgain());
               return;
             }
@@ -2166,16 +2177,14 @@ function fastXfer(src, dst, srcPath, dstPath, opts, cb) {
         }
 
         function onread(err, nb, data, dstpos, datapos, origChunkLen) {
-          if (err)
-            return onerror(err);
+          if (err) return onerror(err);
 
           datapos = datapos || 0;
 
           dst.write(dstHandle, readbuf, datapos, nb, dstpos, writeCb);
 
           function writeCb(err) {
-            if (err)
-              return onerror(err);
+            if (err) return onerror(err);
 
             total += nb;
             onstep && onstep(total, nb, fsize);
@@ -2186,23 +2195,19 @@ function fastXfer(src, dst, srcPath, dstPath, opts, cb) {
             if (total === fsize) {
               dst.close(dstHandle, (err) => {
                 dstHandle = undefined;
-                if (err)
-                  return onerror(err);
+                if (err) return onerror(err);
                 src.close(srcHandle, (err) => {
                   srcHandle = undefined;
-                  if (err)
-                    return onerror(err);
+                  if (err) return onerror(err);
                   cb();
                 });
               });
               return;
             }
 
-            if (pdst >= fsize)
-              return;
+            if (pdst >= fsize) return;
 
-            const chunk =
-              (pdst + chunkSize > fsize ? fsize - pdst : chunkSize);
+            const chunk = pdst + chunkSize > fsize ? fsize - pdst : chunkSize;
             singleRead(datapos, pdst, chunk);
             pdst += chunk;
           }
@@ -2215,20 +2220,21 @@ function fastXfer(src, dst, srcPath, dstPath, opts, cb) {
         }
 
         function singleRead(psrc, pdst, chunk) {
-          src.read(srcHandle,
-                   readbuf,
-                   psrc,
-                   chunk,
-                   pdst,
-                   makeCb(psrc, pdst, chunk));
+          src.read(
+            srcHandle,
+            readbuf,
+            psrc,
+            chunk,
+            pdst,
+            makeCb(psrc, pdst, chunk)
+          );
         }
 
         function startReads() {
           let reads = 0;
           let psrc = 0;
           while (pdst < fsize && reads < concurrency) {
-            const chunk =
-              (pdst + chunkSize > fsize ? fsize - pdst : chunkSize);
+            const chunk = pdst + chunkSize > fsize ? fsize - pdst : chunkSize;
             singleRead(psrc, pdst, chunk);
             psrc += chunk;
             pdst += chunk;
@@ -2241,14 +2247,9 @@ function fastXfer(src, dst, srcPath, dstPath, opts, cb) {
 }
 
 function writeAll(sftp, handle, buffer, offset, length, position, callback_) {
-  const callback = (typeof callback_ === 'function' ? callback_ : undefined);
+  const callback = typeof callback_ === "function" ? callback_ : undefined;
 
-  sftp.write(handle,
-             buffer,
-             offset,
-             length,
-             position,
-             (writeErr, written) => {
+  sftp.write(handle, buffer, offset, length, position, (writeErr, written) => {
     if (writeErr) {
       return sftp.close(handle, () => {
         callback && callback(writeErr);
@@ -2265,36 +2266,43 @@ function writeAll(sftp, handle, buffer, offset, length, position, callback_) {
   });
 }
 
-class Stats {
+export class Stats {
+  atime: any;
+  extended: any;
+  gid: any;
+  mode: any;
+  mtime: any;
+  size: any;
+  uid: any;
   constructor(initial) {
-    this.mode = (initial && initial.mode);
-    this.uid = (initial && initial.uid);
-    this.gid = (initial && initial.gid);
-    this.size = (initial && initial.size);
-    this.atime = (initial && initial.atime);
-    this.mtime = (initial && initial.mtime);
-    this.extended = (initial && initial.extended);
+    this.mode = initial && initial.mode;
+    this.uid = initial && initial.uid;
+    this.gid = initial && initial.gid;
+    this.size = initial && initial.size;
+    this.atime = initial && initial.atime;
+    this.mtime = initial && initial.mtime;
+    this.extended = initial && initial.extended;
   }
   isDirectory() {
-    return ((this.mode & constants.S_IFMT) === constants.S_IFDIR);
+    return (this.mode & constants.S_IFMT) === constants.S_IFDIR;
   }
   isFile() {
-    return ((this.mode & constants.S_IFMT) === constants.S_IFREG);
+    return (this.mode & constants.S_IFMT) === constants.S_IFREG;
   }
   isBlockDevice() {
-    return ((this.mode & constants.S_IFMT) === constants.S_IFBLK);
+    return (this.mode & constants.S_IFMT) === constants.S_IFBLK;
   }
   isCharacterDevice() {
-    return ((this.mode & constants.S_IFMT) === constants.S_IFCHR);
+    return (this.mode & constants.S_IFMT) === constants.S_IFCHR;
   }
   isSymbolicLink() {
-    return ((this.mode & constants.S_IFMT) === constants.S_IFLNK);
+    return (this.mode & constants.S_IFMT) === constants.S_IFLNK;
   }
   isFIFO() {
-    return ((this.mode & constants.S_IFMT) === constants.S_IFIFO);
+    return (this.mode & constants.S_IFMT) === constants.S_IFIFO;
   }
   isSocket() {
-    return ((this.mode & constants.S_IFMT) === constants.S_IFSOCK);
+    return (this.mode & constants.S_IFMT) === constants.S_IFSOCK;
   }
 }
 
@@ -2302,8 +2310,8 @@ function attrsToBytes(attrs) {
   let flags = 0;
   let nb = 0;
 
-  if (typeof attrs === 'object' && attrs !== null) {
-    if (typeof attrs.size === 'number') {
+  if (typeof attrs === "object" && attrs !== null) {
+    if (typeof attrs.size === "number") {
       flags |= ATTR.SIZE;
       const val = attrs.size;
       // Big Endian
@@ -2316,7 +2324,7 @@ function attrsToBytes(attrs) {
       ATTRS_BUF[nb++] = val / 256; // 2**8
       ATTRS_BUF[nb++] = val;
     }
-    if (typeof attrs.uid === 'number' && typeof attrs.gid === 'number') {
+    if (typeof attrs.uid === "number" && typeof attrs.gid === "number") {
       flags |= ATTR.UIDGID;
       const uid = attrs.uid;
       const gid = attrs.gid;
@@ -2330,7 +2338,7 @@ function attrsToBytes(attrs) {
       ATTRS_BUF[nb++] = gid >>> 8;
       ATTRS_BUF[nb++] = gid;
     }
-    if (typeof attrs.mode === 'number' || typeof attrs.mode === 'string') {
+    if (typeof attrs.mode === "number" || typeof attrs.mode === "string") {
       const mode = modeNum(attrs.mode);
       flags |= ATTR.PERMISSIONS;
       // Big Endian
@@ -2339,8 +2347,10 @@ function attrsToBytes(attrs) {
       ATTRS_BUF[nb++] = mode >>> 8;
       ATTRS_BUF[nb++] = mode;
     }
-    if ((typeof attrs.atime === 'number' || isDate(attrs.atime))
-        && (typeof attrs.mtime === 'number' || isDate(attrs.mtime))) {
+    if (
+      (typeof attrs.atime === "number" || isDate(attrs.atime)) &&
+      (typeof attrs.mtime === "number" || isDate(attrs.mtime))
+    ) {
       const atime = toUnixTimestamp(attrs.atime);
       const mtime = toUnixTimestamp(attrs.mtime);
 
@@ -2363,56 +2373,72 @@ function attrsToBytes(attrs) {
 
 function toUnixTimestamp(time) {
   // eslint-disable-next-line no-self-compare
-  if (typeof time === 'number' && time === time) // Valid, non-NaN number
+  if (typeof time === "number" && time === time)
+    // Valid, non-NaN number
     return time;
-  if (isDate(time))
-    return parseInt(time.getTime() / 1000, 10);
+  // @ts-expect-error TS(2345): Argument of type 'number' is not assignable to par... Remove this comment to see the full error message
+  if (isDate(time)) return parseInt(time.getTime() / 1000, 10);
   throw new Error(`Cannot parse time: ${time}`);
 }
 
 function modeNum(mode) {
   // eslint-disable-next-line no-self-compare
-  if (typeof mode === 'number' && mode === mode) // Valid, non-NaN number
+  if (typeof mode === "number" && mode === mode)
+    // Valid, non-NaN number
     return mode;
-  if (typeof mode === 'string')
-    return modeNum(parseInt(mode, 8));
+  if (typeof mode === "string") return modeNum(parseInt(mode, 8));
   throw new Error(`Cannot parse mode: ${mode}`);
 }
 
 const stringFlagMap = {
-  'r': OPEN_MODE.READ,
-  'r+': OPEN_MODE.READ | OPEN_MODE.WRITE,
-  'w': OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.WRITE,
-  'wx': OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.WRITE | OPEN_MODE.EXCL,
-  'xw': OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.WRITE | OPEN_MODE.EXCL,
-  'w+': OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.READ | OPEN_MODE.WRITE,
-  'wx+': OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.READ | OPEN_MODE.WRITE
-         | OPEN_MODE.EXCL,
-  'xw+': OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.READ | OPEN_MODE.WRITE
-         | OPEN_MODE.EXCL,
-  'a': OPEN_MODE.APPEND | OPEN_MODE.CREAT | OPEN_MODE.WRITE,
-  'ax': OPEN_MODE.APPEND | OPEN_MODE.CREAT | OPEN_MODE.WRITE | OPEN_MODE.EXCL,
-  'xa': OPEN_MODE.APPEND | OPEN_MODE.CREAT | OPEN_MODE.WRITE | OPEN_MODE.EXCL,
-  'a+': OPEN_MODE.APPEND | OPEN_MODE.CREAT | OPEN_MODE.READ | OPEN_MODE.WRITE,
-  'ax+': OPEN_MODE.APPEND | OPEN_MODE.CREAT | OPEN_MODE.READ | OPEN_MODE.WRITE
-         | OPEN_MODE.EXCL,
-  'xa+': OPEN_MODE.APPEND | OPEN_MODE.CREAT | OPEN_MODE.READ | OPEN_MODE.WRITE
-         | OPEN_MODE.EXCL
+  r: OPEN_MODE.READ,
+  "r+": OPEN_MODE.READ | OPEN_MODE.WRITE,
+  w: OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.WRITE,
+  wx: OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.WRITE | OPEN_MODE.EXCL,
+  xw: OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.WRITE | OPEN_MODE.EXCL,
+  "w+": OPEN_MODE.TRUNC | OPEN_MODE.CREAT | OPEN_MODE.READ | OPEN_MODE.WRITE,
+  "wx+":
+    OPEN_MODE.TRUNC |
+    OPEN_MODE.CREAT |
+    OPEN_MODE.READ |
+    OPEN_MODE.WRITE |
+    OPEN_MODE.EXCL,
+  "xw+":
+    OPEN_MODE.TRUNC |
+    OPEN_MODE.CREAT |
+    OPEN_MODE.READ |
+    OPEN_MODE.WRITE |
+    OPEN_MODE.EXCL,
+  a: OPEN_MODE.APPEND | OPEN_MODE.CREAT | OPEN_MODE.WRITE,
+  ax: OPEN_MODE.APPEND | OPEN_MODE.CREAT | OPEN_MODE.WRITE | OPEN_MODE.EXCL,
+  xa: OPEN_MODE.APPEND | OPEN_MODE.CREAT | OPEN_MODE.WRITE | OPEN_MODE.EXCL,
+  "a+": OPEN_MODE.APPEND | OPEN_MODE.CREAT | OPEN_MODE.READ | OPEN_MODE.WRITE,
+  "ax+":
+    OPEN_MODE.APPEND |
+    OPEN_MODE.CREAT |
+    OPEN_MODE.READ |
+    OPEN_MODE.WRITE |
+    OPEN_MODE.EXCL,
+  "xa+":
+    OPEN_MODE.APPEND |
+    OPEN_MODE.CREAT |
+    OPEN_MODE.READ |
+    OPEN_MODE.WRITE |
+    OPEN_MODE.EXCL,
 };
 
-function stringToFlags(str) {
+export function stringToFlags(str) {
   const flags = stringFlagMap[str];
-  return (flags !== undefined ? flags : null);
+  return flags !== undefined ? flags : null;
 }
 
-const flagsToString = (() => {
+export const flagsToString = (() => {
   const stringFlagMapKeys = Object.keys(stringFlagMap);
   return (flags) => {
-    for (let i = 0; i < stringFlagMapKeys.length; ++i) {
-      const key = stringFlagMapKeys[i];
-      if (stringFlagMap[key] === flags)
-        return key;
+    for (const key of stringFlagMapKeys) {
+      if (stringFlagMap[key] === flags) return key;
     }
+
     return null;
   };
 })();
@@ -2433,52 +2459,46 @@ function readAttrs(biOpt) {
                so that number of pairs equals extended_count
   */
   const flags = bufferParser.readUInt32BE();
-  if (flags === undefined)
-    return;
+  if (flags === undefined) return;
 
+  // @ts-expect-error TS(2554): Expected 1 arguments, but got 0.
   const attrs = new Stats();
   if (flags & ATTR.SIZE) {
     const size = bufferParser.readUInt64BE(biOpt);
-    if (size === undefined)
-      return;
+    if (size === undefined) return;
     attrs.size = size;
   }
 
   if (flags & ATTR.UIDGID) {
     const uid = bufferParser.readUInt32BE();
     const gid = bufferParser.readUInt32BE();
-    if (gid === undefined)
-      return;
+    if (gid === undefined) return;
     attrs.uid = uid;
     attrs.gid = gid;
   }
 
   if (flags & ATTR.PERMISSIONS) {
     const mode = bufferParser.readUInt32BE();
-    if (mode === undefined)
-      return;
+    if (mode === undefined) return;
     attrs.mode = mode;
   }
 
   if (flags & ATTR.ACMODTIME) {
     const atime = bufferParser.readUInt32BE();
     const mtime = bufferParser.readUInt32BE();
-    if (mtime === undefined)
-      return;
+    if (mtime === undefined) return;
     attrs.atime = atime;
     attrs.mtime = mtime;
   }
 
   if (flags & ATTR.EXTENDED) {
     const count = bufferParser.readUInt32BE();
-    if (count === undefined)
-      return;
+    if (count === undefined) return;
     const extended = {};
     for (let i = 0; i < count; ++i) {
       const type = bufferParser.readString(true);
       const data = bufferParser.readString();
-      if (data === undefined)
-        return;
+      if (data === undefined) return;
       extended[type] = data;
     }
     attrs.extended = extended;
@@ -2498,8 +2518,7 @@ function sendOrBuffer(sftp, payload) {
 
 function tryWritePayload(sftp, payload) {
   const outgoing = sftp.outgoing;
-  if (outgoing.state !== 'open')
-    return;
+  if (outgoing.state !== "open") return;
 
   if (outgoing.window === 0) {
     sftp._waitWindow = true;
@@ -2522,24 +2541,24 @@ function tryWritePayload(sftp, payload) {
     if (p === 0 && actualLen === len) {
       sftp._protocol.channelData(sftp.outgoing.id, payload);
     } else {
-      sftp._protocol.channelData(sftp.outgoing.id,
-                                 bufferSlice(payload, p, p + actualLen));
+      sftp._protocol.channelData(
+        sftp.outgoing.id,
+        bufferSlice(payload, p, p + actualLen)
+      );
     }
 
     p += actualLen;
   }
 
   if (len - p > 0) {
-    if (p > 0)
-      ret = bufferSlice(payload, p, len);
-    else
-      ret = payload; // XXX: should never get here?
+    if (p > 0) ret = bufferSlice(payload, p, len);
+    else ret = payload; // XXX: should never get here?
   }
 
   return ret;
 }
 
-function drainBuffer() {
+function drainBuffer(this: any) {
   this._chunkcb = undefined;
   const buffer = this._buffer;
   let i = 0;
@@ -2547,24 +2566,20 @@ function drainBuffer() {
     const payload = buffer[i];
     const ret = tryWritePayload(this, payload);
     if (ret !== undefined) {
-      if (ret !== payload)
-        buffer[i] = ret;
-      if (i > 0)
-        this._buffer = buffer.slice(i);
+      if (ret !== payload) buffer[i] = ret;
+      if (i > 0) this._buffer = buffer.slice(i);
       return;
     }
     ++i;
   }
-  if (i > 0)
-    this._buffer = [];
+  if (i > 0) this._buffer = [];
 }
 
 function doFatalSFTPError(sftp, msg, noDebug) {
   const err = new Error(msg);
-  err.level = 'sftp-protocol';
-  if (!noDebug && sftp._debug)
-    sftp._debug(`SFTP: Inbound: ${msg}`);
-  sftp.emit('error', err);
+  (err as any).level = "sftp-protocol";
+  if (!noDebug && sftp._debug) sftp._debug(`SFTP: Inbound: ${msg}`);
+  sftp.emit("error", err);
   sftp.destroy();
   cleanupRequests(sftp);
   return false;
@@ -2572,16 +2587,14 @@ function doFatalSFTPError(sftp, msg, noDebug) {
 
 function cleanupRequests(sftp) {
   const keys = Object.keys(sftp._requests);
-  if (keys.length === 0)
-    return;
+  if (keys.length === 0) return;
 
   const reqs = sftp._requests;
   sftp._requests = {};
-  const err = new Error('No response from server');
+  const err = new Error("No response from server");
   for (let i = 0; i < keys.length; ++i) {
     const req = reqs[keys[i]];
-    if (typeof req.cb === 'function')
-      req.cb(err);
+    if (typeof req.cb === "function") req.cb(err);
   }
 }
 
@@ -2595,17 +2608,17 @@ function requestLimits(sftp, cb) {
 
   writeUInt32BE(buf, buf.length - 4, 0);
   buf[4] = REQUEST.EXTENDED;
-  const reqid = sftp._writeReqid = (sftp._writeReqid + 1) & MAX_REQID;
+  const reqid = (sftp._writeReqid = (sftp._writeReqid + 1) & MAX_REQID);
   writeUInt32BE(buf, reqid, 5);
 
   writeUInt32BE(buf, 18, p);
-  buf.utf8Write('limits@openssh.com', p += 4, 18);
+  (buf as any).utf8Write("limits@openssh.com", (p += 4), 18);
 
-  sftp._requests[reqid] = { extended: 'limits@openssh.com', cb };
+  sftp._requests[reqid] = { extended: "limits@openssh.com", cb };
 
   const isBuffered = sendOrBuffer(sftp, buf);
   if (sftp._debug) {
-    const which = (isBuffered ? 'Buffered' : 'Sending');
+    const which = isBuffered ? "Buffered" : "Sending";
     sftp._debug(`SFTP: Outbound: ${which} limits@openssh.com`);
   }
 }
@@ -2613,7 +2626,8 @@ function requestLimits(sftp, cb) {
 const CLIENT_HANDLERS = {
   [RESPONSE.VERSION]: (sftp, payload) => {
     if (sftp._version !== -1)
-      return doFatalSFTPError(sftp, 'Duplicate VERSION packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Duplicate VERSION packet");
 
     const extensions = {};
 
@@ -2635,7 +2649,8 @@ const CLIENT_HANDLERS = {
     bufferParser.clear();
 
     if (version === undefined)
-      return doFatalSFTPError(sftp, 'Malformed VERSION packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed VERSION packet");
 
     if (sftp._debug) {
       const names = Object.keys(extensions);
@@ -2651,24 +2666,23 @@ const CLIENT_HANDLERS = {
     sftp._version = version;
     sftp._extensions = extensions;
 
-    if (extensions['limits@openssh.com'] === '1') {
-      return requestLimits(sftp, (err, limits) => {
-        if (!err) {
-          if (limits.maxPktLen > 0)
-            sftp._maxOutPktLen = limits.maxPktLen;
-          if (limits.maxReadLen > 0)
-            sftp._maxReadLen = limits.maxReadLen;
-          if (limits.maxWriteLen > 0)
-            sftp._maxWriteLen = limits.maxWriteLen;
-          sftp.maxOpenHandles = (
-            limits.maxOpenHandles > 0 ? limits.maxOpenHandles : Infinity
-          );
+    if (extensions["limits@openssh.com"] === "1") {
+      return requestLimits(
+        sftp,
+        (err, { maxPktLen, maxReadLen, maxWriteLen, maxOpenHandles }) => {
+          if (!err) {
+            if (maxPktLen > 0) sftp._maxOutPktLen = maxPktLen;
+            if (maxReadLen > 0) sftp._maxReadLen = maxReadLen;
+            if (maxWriteLen > 0) sftp._maxWriteLen = maxWriteLen;
+            sftp.maxOpenHandles =
+              maxOpenHandles > 0 ? maxOpenHandles : Infinity;
+          }
+          sftp.emit("ready");
         }
-        sftp.emit('ready');
-      });
+      );
     }
 
-    sftp.emit('ready');
+    sftp.emit("ready");
   },
   [RESPONSE.STATUS]: (sftp, payload) => {
     bufferParser.init(payload, 1);
@@ -2696,15 +2710,15 @@ const CLIENT_HANDLERS = {
     }
     const req = sftp._requests[reqID];
     delete sftp._requests[reqID];
-    if (req && typeof req.cb === 'function') {
+    if (req && typeof req.cb === "function") {
       if (errorCode === STATUS_CODE.OK) {
         req.cb();
         return;
       }
-      const err = new Error(errorMsg
-                            || STATUS_CODE_STR[errorCode]
-                            || 'Unknown status');
-      err.code = errorCode;
+      const err = new Error(
+        errorMsg || STATUS_CODE_STR[errorCode] || "Unknown status"
+      );
+      (err as any).code = errorCode;
       req.cb(err);
     }
   },
@@ -2718,17 +2732,16 @@ const CLIENT_HANDLERS = {
     bufferParser.clear();
 
     if (handle === undefined) {
-      if (reqID !== undefined)
-        delete sftp._requests[reqID];
-      return doFatalSFTPError(sftp, 'Malformed HANDLE packet');
+      if (reqID !== undefined) delete sftp._requests[reqID];
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed HANDLE packet");
     }
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received HANDLE (id:${reqID})`);
 
     const req = sftp._requests[reqID];
     delete sftp._requests[reqID];
-    if (req && typeof req.cb === 'function')
-      req.cb(undefined, handle);
+    if (req && typeof req.cb === "function") req.cb(undefined, handle);
   },
   [RESPONSE.DATA]: (sftp, payload) => {
     bufferParser.init(payload, 1);
@@ -2741,7 +2754,7 @@ const CLIENT_HANDLERS = {
     /*
       string     data
     */
-    if (req && typeof req.cb === 'function') {
+    if (req && typeof req.cb === "function") {
       if (req.buffer) {
         // We have already pre-allocated space to store the data
 
@@ -2749,9 +2762,8 @@ const CLIENT_HANDLERS = {
         bufferParser.clear();
 
         if (nb !== undefined) {
-          sftp._debug && sftp._debug(
-            `SFTP: Inbound: Received DATA (id:${reqID}, ${nb})`
-          );
+          sftp._debug &&
+            sftp._debug(`SFTP: Inbound: Received DATA (id:${reqID}, ${nb})`);
           req.cb(undefined, req.buffer, nb);
           return;
         }
@@ -2760,9 +2772,10 @@ const CLIENT_HANDLERS = {
         bufferParser.clear();
 
         if (data !== undefined) {
-          sftp._debug && sftp._debug(
-            `SFTP: Inbound: Received DATA (id:${reqID}, ${data.length})`
-          );
+          sftp._debug &&
+            sftp._debug(
+              `SFTP: Inbound: Received DATA (id:${reqID}, ${data.length})`
+            );
           req.cb(undefined, data);
           return;
         }
@@ -2771,14 +2784,14 @@ const CLIENT_HANDLERS = {
       const nb = bufferParser.skipString();
       bufferParser.clear();
       if (nb !== undefined) {
-        sftp._debug && sftp._debug(
-          `SFTP: Inbound: Received DATA (id:${reqID}, ${nb})`
-        );
+        sftp._debug &&
+          sftp._debug(`SFTP: Inbound: Received DATA (id:${reqID}, ${nb})`);
         return;
       }
     }
 
-    return doFatalSFTPError(sftp, 'Malformed DATA packet');
+    // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+    return doFatalSFTPError(sftp, "Malformed DATA packet");
   },
   [RESPONSE.NAME]: (sftp, payload) => {
     bufferParser.init(payload, 1);
@@ -2811,24 +2824,27 @@ const CLIENT_HANDLERS = {
 
         const attrs = readAttrs(sftp._biOpt);
         if (attrs === undefined) {
+          // @ts-expect-error TS(2322): Type 'undefined' is not assignable to type 'never[... Remove this comment to see the full error message
           names = undefined;
           break;
         }
+        // @ts-expect-error TS(2322): Type 'any' is not assignable to type 'never'.
         names.push({ filename, longname, attrs });
       }
       if (names !== undefined) {
-        sftp._debug && sftp._debug(
-          `SFTP: Inbound: Received NAME (id:${reqID}, ${names.length})`
-        );
+        sftp._debug &&
+          sftp._debug(
+            `SFTP: Inbound: Received NAME (id:${reqID}, ${names.length})`
+          );
         bufferParser.clear();
-        if (req && typeof req.cb === 'function')
-          req.cb(undefined, names);
+        if (req && typeof req.cb === "function") req.cb(undefined, names);
         return;
       }
     }
 
     bufferParser.clear();
-    return doFatalSFTPError(sftp, 'Malformed NAME packet');
+    // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+    return doFatalSFTPError(sftp, "Malformed NAME packet");
   },
   [RESPONSE.ATTRS]: (sftp, payload) => {
     bufferParser.init(payload, 1);
@@ -2845,12 +2861,12 @@ const CLIENT_HANDLERS = {
     bufferParser.clear();
     if (attrs !== undefined) {
       sftp._debug && sftp._debug(`SFTP: Inbound: Received ATTRS (id:${reqID})`);
-      if (req && typeof req.cb === 'function')
-        req.cb(undefined, attrs);
+      if (req && typeof req.cb === "function") req.cb(undefined, attrs);
       return;
     }
 
-    return doFatalSFTPError(sftp, 'Malformed ATTRS packet');
+    // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+    return doFatalSFTPError(sftp, "Malformed ATTRS packet");
   },
   [RESPONSE.EXTENDED]: (sftp, payload) => {
     bufferParser.init(payload, 1);
@@ -2860,8 +2876,8 @@ const CLIENT_HANDLERS = {
       if (req) {
         delete sftp._requests[reqID];
         switch (req.extended) {
-          case 'statvfs@openssh.com':
-          case 'fstatvfs@openssh.com': {
+          case "statvfs@openssh.com":
+          case "fstatvfs@openssh.com": {
             /*
               uint64    f_bsize   // file system block size
               uint64    f_frsize  // fundamental fs block size
@@ -2889,20 +2905,17 @@ const CLIENT_HANDLERS = {
               f_flag: bufferParser.readUInt64BE(biOpt),
               f_namemax: bufferParser.readUInt64BE(biOpt),
             };
-            if (stats.f_namemax === undefined)
-              break;
+            if (stats.f_namemax === undefined) break;
             if (sftp._debug) {
               sftp._debug(
-                'SFTP: Inbound: Received EXTENDED_REPLY '
-                  + `(id:${reqID}, ${req.extended})`
+                `SFTP: Inbound: Received EXTENDED_REPLY ${`(id:${reqID}, ${req.extended})`}`
               );
             }
             bufferParser.clear();
-            if (typeof req.cb === 'function')
-              req.cb(undefined, stats);
+            if (typeof req.cb === "function") req.cb(undefined, stats);
             return;
           }
-          case 'limits@openssh.com': {
+          case "limits@openssh.com": {
             /*
               uint64          max-packet-length
               uint64          max-read-length
@@ -2915,46 +2928,46 @@ const CLIENT_HANDLERS = {
               maxWriteLen: bufferParser.readUInt64BE(),
               maxOpenHandles: bufferParser.readUInt64BE(),
             };
-            if (limits.maxOpenHandles === undefined)
-              break;
+            if (limits.maxOpenHandles === undefined) break;
             if (sftp._debug) {
               sftp._debug(
-                'SFTP: Inbound: Received EXTENDED_REPLY '
-                  + `(id:${reqID}, ${req.extended})`
+                `SFTP: Inbound: Received EXTENDED_REPLY ${`(id:${reqID}, ${req.extended})`}`
               );
             }
             bufferParser.clear();
-            if (typeof req.cb === 'function')
-              req.cb(undefined, limits);
+            if (typeof req.cb === "function") req.cb(undefined, limits);
             return;
           }
           default:
             // Unknown extended request
-            sftp._debug && sftp._debug(
-              `SFTP: Inbound: Received EXTENDED_REPLY (id:${reqID}, ???)`
-            );
+            sftp._debug &&
+              sftp._debug(
+                `SFTP: Inbound: Received EXTENDED_REPLY (id:${reqID}, ???)`
+              );
             bufferParser.clear();
-            if (typeof req.cb === 'function')
-              req.cb();
+            if (typeof req.cb === "function") req.cb();
             return;
         }
       } else {
-        sftp._debug && sftp._debug(
-          `SFTP: Inbound: Received EXTENDED_REPLY (id:${reqID}, ???)`
-        );
+        sftp._debug &&
+          sftp._debug(
+            `SFTP: Inbound: Received EXTENDED_REPLY (id:${reqID}, ???)`
+          );
         bufferParser.clear();
         return;
       }
     }
 
     bufferParser.clear();
-    return doFatalSFTPError(sftp, 'Malformed EXTENDED_REPLY packet');
+    // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+    return doFatalSFTPError(sftp, "Malformed EXTENDED_REPLY packet");
   },
 };
 const SERVER_HANDLERS = {
   [REQUEST.INIT]: (sftp, payload) => {
     if (sftp._version !== -1)
-      return doFatalSFTPError(sftp, 'Duplicate INIT packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Duplicate INIT packet");
 
     const extensions = {};
 
@@ -2976,7 +2989,8 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (version === undefined)
-      return doFatalSFTPError(sftp, 'Malformed INIT packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed INIT packet");
 
     if (sftp._debug) {
       const names = Object.keys(extensions);
@@ -2993,7 +3007,7 @@ const SERVER_HANDLERS = {
 
     sftp._version = version;
     sftp._extensions = extensions;
-    sftp.emit('ready');
+    sftp.emit("ready");
   },
   [REQUEST.OPEN]: (sftp, payload) => {
     bufferParser.init(payload, 1);
@@ -3009,11 +3023,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (attrs === undefined)
-      return doFatalSFTPError(sftp, 'Malformed OPEN packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed OPEN packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received OPEN (id:${reqID})`);
 
-    if (!sftp.emit('OPEN', reqID, filename, pflags, attrs)) {
+    if (!sftp.emit("OPEN", reqID, filename, pflags, attrs)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3028,11 +3043,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (handle === undefined || handle.length > 256)
-      return doFatalSFTPError(sftp, 'Malformed CLOSE packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed CLOSE packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received CLOSE (id:${reqID})`);
 
-    if (!sftp.emit('CLOSE', reqID, handle)) {
+    if (!sftp.emit("CLOSE", reqID, handle)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3051,11 +3067,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (len === undefined || handle.length > 256)
-      return doFatalSFTPError(sftp, 'Malformed READ packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed READ packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received READ (id:${reqID})`);
 
-    if (!sftp.emit('READ', reqID, handle, offset, len)) {
+    if (!sftp.emit("READ", reqID, handle, offset, len)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3074,11 +3091,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (data === undefined || handle.length > 256)
-      return doFatalSFTPError(sftp, 'Malformed WRITE packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed WRITE packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received WRITE (id:${reqID})`);
 
-    if (!sftp.emit('WRITE', reqID, handle, offset, data)) {
+    if (!sftp.emit("WRITE", reqID, handle, offset, data)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3093,11 +3111,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (path === undefined)
-      return doFatalSFTPError(sftp, 'Malformed LSTAT packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed LSTAT packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received LSTAT (id:${reqID})`);
 
-    if (!sftp.emit('LSTAT', reqID, path)) {
+    if (!sftp.emit("LSTAT", reqID, path)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3112,11 +3131,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (handle === undefined || handle.length > 256)
-      return doFatalSFTPError(sftp, 'Malformed FSTAT packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed FSTAT packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received FSTAT (id:${reqID})`);
 
-    if (!sftp.emit('FSTAT', reqID, handle)) {
+    if (!sftp.emit("FSTAT", reqID, handle)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3133,11 +3153,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (attrs === undefined)
-      return doFatalSFTPError(sftp, 'Malformed SETSTAT packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed SETSTAT packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received SETSTAT (id:${reqID})`);
 
-    if (!sftp.emit('SETSTAT', reqID, path, attrs)) {
+    if (!sftp.emit("SETSTAT", reqID, path, attrs)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3154,13 +3175,13 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (attrs === undefined || handle.length > 256)
-      return doFatalSFTPError(sftp, 'Malformed FSETSTAT packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed FSETSTAT packet");
 
-    sftp._debug && sftp._debug(
-      `SFTP: Inbound: Received FSETSTAT (id:${reqID})`
-    );
+    sftp._debug &&
+      sftp._debug(`SFTP: Inbound: Received FSETSTAT (id:${reqID})`);
 
-    if (!sftp.emit('FSETSTAT', reqID, handle, attrs)) {
+    if (!sftp.emit("FSETSTAT", reqID, handle, attrs)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3175,11 +3196,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (path === undefined)
-      return doFatalSFTPError(sftp, 'Malformed OPENDIR packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed OPENDIR packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received OPENDIR (id:${reqID})`);
 
-    if (!sftp.emit('OPENDIR', reqID, path)) {
+    if (!sftp.emit("OPENDIR", reqID, path)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3194,11 +3216,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (handle === undefined || handle.length > 256)
-      return doFatalSFTPError(sftp, 'Malformed READDIR packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed READDIR packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received READDIR (id:${reqID})`);
 
-    if (!sftp.emit('READDIR', reqID, handle)) {
+    if (!sftp.emit("READDIR", reqID, handle)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3213,11 +3236,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (path === undefined)
-      return doFatalSFTPError(sftp, 'Malformed REMOVE packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed REMOVE packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received REMOVE (id:${reqID})`);
 
-    if (!sftp.emit('REMOVE', reqID, path)) {
+    if (!sftp.emit("REMOVE", reqID, path)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3234,11 +3258,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (attrs === undefined)
-      return doFatalSFTPError(sftp, 'Malformed MKDIR packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed MKDIR packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received MKDIR (id:${reqID})`);
 
-    if (!sftp.emit('MKDIR', reqID, path, attrs)) {
+    if (!sftp.emit("MKDIR", reqID, path, attrs)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3253,11 +3278,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (path === undefined)
-      return doFatalSFTPError(sftp, 'Malformed RMDIR packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed RMDIR packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received RMDIR (id:${reqID})`);
 
-    if (!sftp.emit('RMDIR', reqID, path)) {
+    if (!sftp.emit("RMDIR", reqID, path)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3272,13 +3298,13 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (path === undefined)
-      return doFatalSFTPError(sftp, 'Malformed REALPATH packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed REALPATH packet");
 
-    sftp._debug && sftp._debug(
-      `SFTP: Inbound: Received REALPATH (id:${reqID})`
-    );
+    sftp._debug &&
+      sftp._debug(`SFTP: Inbound: Received REALPATH (id:${reqID})`);
 
-    if (!sftp.emit('REALPATH', reqID, path)) {
+    if (!sftp.emit("REALPATH", reqID, path)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3293,11 +3319,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (path === undefined)
-      return doFatalSFTPError(sftp, 'Malformed STAT packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed STAT packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received STAT (id:${reqID})`);
 
-    if (!sftp.emit('STAT', reqID, path)) {
+    if (!sftp.emit("STAT", reqID, path)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3314,11 +3341,12 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (newPath === undefined)
-      return doFatalSFTPError(sftp, 'Malformed RENAME packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed RENAME packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received RENAME (id:${reqID})`);
 
-    if (!sftp.emit('RENAME', reqID, oldPath, newPath)) {
+    if (!sftp.emit("RENAME", reqID, oldPath, newPath)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3333,13 +3361,13 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (path === undefined)
-      return doFatalSFTPError(sftp, 'Malformed READLINK packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed READLINK packet");
 
-    sftp._debug && sftp._debug(
-      `SFTP: Inbound: Received READLINK (id:${reqID})`
-    );
+    sftp._debug &&
+      sftp._debug(`SFTP: Inbound: Received READLINK (id:${reqID})`);
 
-    if (!sftp.emit('READLINK', reqID, path)) {
+    if (!sftp.emit("READLINK", reqID, path)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3356,16 +3384,17 @@ const SERVER_HANDLERS = {
     bufferParser.clear();
 
     if (targetPath === undefined)
-      return doFatalSFTPError(sftp, 'Malformed SYMLINK packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed SYMLINK packet");
 
     sftp._debug && sftp._debug(`SFTP: Inbound: Received SYMLINK (id:${reqID})`);
 
     let handled;
     if (sftp._isOpenSSH) {
       // OpenSSH has linkpath and targetpath positions switched
-      handled = sftp.emit('SYMLINK', reqID, targetPath, linkPath);
+      handled = sftp.emit("SYMLINK", reqID, targetPath, linkPath);
     } else {
-      handled = sftp.emit('SYMLINK', reqID, linkPath, targetPath);
+      handled = sftp.emit("SYMLINK", reqID, linkPath, targetPath);
     }
     if (!handled) {
       // Automatically reject request if no handler for request type
@@ -3382,19 +3411,18 @@ const SERVER_HANDLERS = {
     const extName = bufferParser.readString(true);
     if (extName === undefined) {
       bufferParser.clear();
-      return doFatalSFTPError(sftp, 'Malformed EXTENDED packet');
+      // @ts-expect-error TS(2554): Expected 3 arguments, but got 2.
+      return doFatalSFTPError(sftp, "Malformed EXTENDED packet");
     }
 
     let extData;
-    if (bufferParser.avail())
-      extData = bufferParser.readRaw();
+    if (bufferParser.avail()) extData = bufferParser.readRaw();
     bufferParser.clear();
 
-    sftp._debug && sftp._debug(
-      `SFTP: Inbound: Received EXTENDED (id:${reqID})`
-    );
+    sftp._debug &&
+      sftp._debug(`SFTP: Inbound: Received EXTENDED (id:${reqID})`);
 
-    if (!sftp.emit('EXTENDED', reqID, extName, extData)) {
+    if (!sftp.emit("EXTENDED", reqID, extName, extData)) {
       // Automatically reject request if no handler for request type
       sftp.status(reqID, STATUS_CODE.OP_UNSUPPORTED);
     }
@@ -3404,11 +3432,11 @@ const SERVER_HANDLERS = {
 // =============================================================================
 // ReadStream/WriteStream-related ==============================================
 // =============================================================================
-const {
+import {
   ERR_INVALID_ARG_TYPE,
   ERR_OUT_OF_RANGE,
-  validateNumber
-} = require('./node-fs-compat');
+  validateNumber,
+} from "./node-fs-compat";
 
 const kMinPoolSpace = 128;
 
@@ -3421,10 +3449,8 @@ let pool;
 const poolFragments = [];
 
 function allocNewPool(poolSize) {
-  if (poolFragments.length > 0)
-    pool = poolFragments.pop();
-  else
-    pool = Buffer.allocUnsafe(poolSize);
+  if (poolFragments.length > 0) pool = poolFragments.pop();
+  else pool = Buffer.allocUnsafe(poolSize);
   pool.used = 0;
 }
 
@@ -3433,428 +3459,456 @@ function checkPosition(pos, name) {
   if (!Number.isSafeInteger(pos)) {
     validateNumber(pos, name);
     if (!Number.isInteger(pos))
-      throw new ERR_OUT_OF_RANGE(name, 'an integer', pos);
-    throw new ERR_OUT_OF_RANGE(name, '>= 0 and <= 2 ** 53 - 1', pos);
+      // @ts-expect-error TS(2554): Expected 4 arguments, but got 3.
+      throw new ERR_OUT_OF_RANGE(name, "an integer", pos);
+    // @ts-expect-error TS(2554): Expected 4 arguments, but got 3.
+    throw new ERR_OUT_OF_RANGE(name, ">= 0 and <= 2 ** 53 - 1", pos);
   }
-  if (pos < 0)
-    throw new ERR_OUT_OF_RANGE(name, '>= 0 and <= 2 ** 53 - 1', pos);
+  // @ts-expect-error TS(2554): Expected 4 arguments, but got 3.
+  if (pos < 0) throw new ERR_OUT_OF_RANGE(name, ">= 0 and <= 2 ** 53 - 1", pos);
 }
 
 function roundUpToMultipleOf8(n) {
-  return (n + 7) & ~7;  // Align to 8 byte boundary.
+  return (n + 7) & ~7; // Align to 8 byte boundary.
 }
 
-function ReadStream(sftp, path, options) {
-  if (options === undefined)
-    options = {};
-  else if (typeof options === 'string')
-    options = { encoding: options };
-  else if (options === null || typeof options !== 'object')
-    throw new TypeError('"options" argument must be a string or an object');
-  else
-    options = Object.create(options);
+class ReadStream {
+  _opening: any;
+  _readableState: any;
+  autoClose: any;
+  bytesRead: any;
+  destroy: any;
+  destroyed: any;
+  emit: any;
+  end: any;
+  flags: any;
+  handle: any;
+  isClosed: any;
+  mode: any;
+  on: any;
+  once: any;
+  path: any;
+  pos: any;
+  push: any;
+  read: any;
+  readableHighWaterMark: any;
+  sftp: any;
+  start: any;
+  constructor(sftp, path, options) {
+    if (options === undefined) options = {};
+    else if (typeof options === "string") options = { encoding: options };
+    else if (options === null || typeof options !== "object")
+      throw new TypeError('"options" argument must be a string or an object');
+    else options = Object.create(options);
 
-  // A little bit bigger buffer and water marks by default
-  if (options.highWaterMark === undefined)
-    options.highWaterMark = 64 * 1024;
+    // A little bit bigger buffer and water marks by default
+    if (options.highWaterMark === undefined) options.highWaterMark = 64 * 1024;
 
-  // For backwards compat do not emit close on destroy.
-  options.emitClose = false;
-  options.autoDestroy = false; // Node 14 major change.
+    // For backwards compat do not emit close on destroy.
+    options.emitClose = false;
+    options.autoDestroy = false; // Node 14 major change.
 
-  ReadableStream.call(this, options);
+    // @ts-expect-error TS(2345): Argument of type 'this' is not assignable to param... Remove this comment to see the full error message
+    ReadableStream.call(this, options);
 
-  this.path = path;
-  this.flags = options.flags === undefined ? 'r' : options.flags;
-  this.mode = options.mode === undefined ? 0o666 : options.mode;
+    this.path = path;
+    this.flags = options.flags === undefined ? "r" : options.flags;
+    this.mode = options.mode === undefined ? 0o666 : options.mode;
 
-  this.start = options.start;
-  this.end = options.end;
-  this.autoClose = options.autoClose === undefined ? true : options.autoClose;
-  this.pos = 0;
-  this.bytesRead = 0;
-  this.isClosed = false;
+    this.start = options.start;
+    this.end = options.end;
+    this.autoClose = options.autoClose === undefined ? true : options.autoClose;
+    this.pos = 0;
+    this.bytesRead = 0;
+    this.isClosed = false;
 
-  this.handle = options.handle === undefined ? null : options.handle;
-  this.sftp = sftp;
-  this._opening = false;
-
-  if (this.start !== undefined) {
-    checkPosition(this.start, 'start');
-
-    this.pos = this.start;
-  }
-
-  if (this.end === undefined) {
-    this.end = Infinity;
-  } else if (this.end !== Infinity) {
-    checkPosition(this.end, 'end');
-
-    if (this.start !== undefined && this.start > this.end) {
-      throw new ERR_OUT_OF_RANGE(
-        'start',
-        `<= "end" (here: ${this.end})`,
-        this.start
-      );
-    }
-  }
-
-  this.on('end', function() {
-    if (this.autoClose)
-      this.destroy();
-  });
-
-  if (!Buffer.isBuffer(this.handle))
-    this.open();
-}
-inherits(ReadStream, ReadableStream);
-
-ReadStream.prototype.open = function() {
-  if (this._opening)
-    return;
-
-  this._opening = true;
-
-  this.sftp.open(this.path, this.flags, this.mode, (er, handle) => {
+    this.handle = options.handle === undefined ? null : options.handle;
+    this.sftp = sftp;
     this._opening = false;
 
-    if (er) {
-      this.emit('error', er);
-      if (this.autoClose)
-        this.destroy();
+    if (this.start !== undefined) {
+      checkPosition(this.start, "start");
+
+      this.pos = this.start;
+    }
+
+    if (this.end === undefined) {
+      this.end = Infinity;
+    } else if (this.end !== Infinity) {
+      checkPosition(this.end, "end");
+
+      if (this.start !== undefined && this.start > this.end) {
+        // @ts-expect-error TS(2554): Expected 4 arguments, but got 3.
+        throw new ERR_OUT_OF_RANGE(
+          "start",
+          `<= "end" (here: ${this.end})`,
+          this.start
+        );
+      }
+    }
+
+    this.on("end", function (this: any) {
+      if (this.autoClose) this.destroy();
+    });
+
+    if (!Buffer.isBuffer(this.handle)) this.open();
+  }
+
+  open() {
+    if (this._opening) return;
+
+    this._opening = true;
+
+    this.sftp.open(this.path, this.flags, this.mode, (er, handle) => {
+      this._opening = false;
+
+      if (er) {
+        this.emit("error", er);
+        if (this.autoClose) this.destroy();
+        return;
+      }
+
+      this.handle = handle;
+      this.emit("open", handle);
+      this.emit("ready");
+      // Start the flow of data.
+      this.read();
+    });
+  }
+
+  _read(n) {
+    if (!Buffer.isBuffer(this.handle))
+      return this.once("open", () => this._read(n));
+
+    // XXX: safe to remove this?
+    if (this.destroyed) return;
+
+    if (!pool || pool.length - pool.used < kMinPoolSpace) {
+      // Discard the old pool.
+      allocNewPool(
+        this.readableHighWaterMark || this._readableState.highWaterMark
+      );
+    }
+
+    // Grab another reference to the pool in the case that while we're
+    // in the thread pool another read() finishes up the pool, and
+    // allocates a new one.
+    const thisPool = pool;
+    let toRead = Math.min(pool.length - pool.used, n);
+    const start = pool.used;
+
+    if (this.end !== undefined)
+      toRead = Math.min(this.end - this.pos + 1, toRead);
+
+    // Already read everything we were supposed to read!
+    // treat as EOF.
+    if (toRead <= 0) return this.push(null);
+
+    // the actual read.
+    this.sftp.read(
+      this.handle,
+      pool,
+      pool.used,
+      toRead,
+      this.pos,
+      (er, bytesRead) => {
+        if (er) {
+          this.emit("error", er);
+          if (this.autoClose) this.destroy();
+          return;
+        }
+        let b = null;
+
+        // Now that we know how much data we have actually read, re-wind the
+        // 'used' field if we can, and otherwise allow the remainder of our
+        // reservation to be used as a new pool later.
+        if (start + toRead === thisPool.used && thisPool === pool) {
+          thisPool.used = roundUpToMultipleOf8(
+            thisPool.used + bytesRead - toRead
+          );
+        } else {
+          // Round down to the next lowest multiple of 8 to ensure the new pool
+          // fragment start and end positions are aligned to an 8 byte boundary.
+          const alignedEnd = (start + toRead) & ~7;
+          const alignedStart = roundUpToMultipleOf8(start + bytesRead);
+          if (alignedEnd - alignedStart >= kMinPoolSpace)
+            // @ts-expect-error TS(2345): Argument of type 'any' is not assignable to parame... Remove this comment to see the full error message
+            poolFragments.push(thisPool.slice(alignedStart, alignedEnd));
+        }
+
+        if (bytesRead > 0) {
+          this.bytesRead += bytesRead;
+          b = thisPool.slice(start, start + bytesRead);
+        }
+
+        // Move the pool positions, and internal position for reading.
+        this.pos += bytesRead;
+
+        this.push(b);
+      }
+    );
+
+    pool.used = roundUpToMultipleOf8(pool.used + toRead);
+  }
+
+  _destroy(err, cb) {
+    if (this._opening && !Buffer.isBuffer(this.handle)) {
+      this.once("open", closeStream.bind(null, this, cb, err));
       return;
     }
 
-    this.handle = handle;
-    this.emit('open', handle);
-    this.emit('ready');
-    // Start the flow of data.
-    this.read();
-  });
-};
-
-ReadStream.prototype._read = function(n) {
-  if (!Buffer.isBuffer(this.handle))
-    return this.once('open', () => this._read(n));
-
-  // XXX: safe to remove this?
-  if (this.destroyed)
-    return;
-
-  if (!pool || pool.length - pool.used < kMinPoolSpace) {
-    // Discard the old pool.
-    allocNewPool(this.readableHighWaterMark
-                 || this._readableState.highWaterMark);
+    closeStream(this, cb, err);
+    this.handle = null;
+    this._opening = false;
   }
 
-  // Grab another reference to the pool in the case that while we're
-  // in the thread pool another read() finishes up the pool, and
-  // allocates a new one.
-  const thisPool = pool;
-  let toRead = Math.min(pool.length - pool.used, n);
-  const start = pool.used;
-
-  if (this.end !== undefined)
-    toRead = Math.min(this.end - this.pos + 1, toRead);
-
-  // Already read everything we were supposed to read!
-  // treat as EOF.
-  if (toRead <= 0)
-    return this.push(null);
-
-  // the actual read.
-  this.sftp.read(this.handle,
-                 pool,
-                 pool.used,
-                 toRead,
-                 this.pos,
-                 (er, bytesRead) => {
-    if (er) {
-      this.emit('error', er);
-      if (this.autoClose)
-        this.destroy();
-      return;
-    }
-    let b = null;
-
-    // Now that we know how much data we have actually read, re-wind the
-    // 'used' field if we can, and otherwise allow the remainder of our
-    // reservation to be used as a new pool later.
-    if (start + toRead === thisPool.used && thisPool === pool) {
-      thisPool.used = roundUpToMultipleOf8(thisPool.used + bytesRead - toRead);
-    } else {
-      // Round down to the next lowest multiple of 8 to ensure the new pool
-      // fragment start and end positions are aligned to an 8 byte boundary.
-      const alignedEnd = (start + toRead) & ~7;
-      const alignedStart = roundUpToMultipleOf8(start + bytesRead);
-      if (alignedEnd - alignedStart >= kMinPoolSpace)
-        poolFragments.push(thisPool.slice(alignedStart, alignedEnd));
-    }
-
-    if (bytesRead > 0) {
-      this.bytesRead += bytesRead;
-      b = thisPool.slice(start, start + bytesRead);
-    }
-
-    // Move the pool positions, and internal position for reading.
-    this.pos += bytesRead;
-
-    this.push(b);
-  });
-
-  pool.used = roundUpToMultipleOf8(pool.used + toRead);
-};
-
-ReadStream.prototype._destroy = function(err, cb) {
-  if (this._opening && !Buffer.isBuffer(this.handle)) {
-    this.once('open', closeStream.bind(null, this, cb, err));
-    return;
+  close(cb) {
+    this.destroy(null, cb);
   }
 
-  closeStream(this, cb, err);
-  this.handle = null;
-  this._opening = false;
-};
+  get pending() {
+    return this.handle === null;
+  }
+}
+
+inherits(ReadStream, ReadableStream);
 
 function closeStream(stream, cb, err) {
-  if (!stream.handle)
-    return onclose();
+  if (!stream.handle) return onclose();
 
   stream.sftp.close(stream.handle, onclose);
 
-  function onclose(er) {
-    er = er || err;
+  function onclose(er = err) {
     cb(er);
     stream.isClosed = true;
-    if (!er)
-      stream.emit('close');
+    if (!er) stream.emit("close");
   }
 }
-
-ReadStream.prototype.close = function(cb) {
-  this.destroy(null, cb);
-};
-
-Object.defineProperty(ReadStream.prototype, 'pending', {
-  get() {
-    return this.handle === null;
-  },
-  configurable: true
-});
 
 // TODO: add `concurrency` setting to allow more than one in-flight WRITE
 // request to server to improve throughput
-function WriteStream(sftp, path, options) {
-  if (options === undefined)
-    options = {};
-  else if (typeof options === 'string')
-    options = { encoding: options };
-  else if (options === null || typeof options !== 'object')
-    throw new TypeError('"options" argument must be a string or an object');
-  else
-    options = Object.create(options);
+class WriteStream {
+  _opening: any;
+  autoClose: any;
+  bytesWritten: any;
+  destroy: any;
+  emit: any;
+  end: any;
+  flags: any;
+  handle: any;
+  isClosed: any;
+  mode: any;
+  on: any;
+  once: any;
+  path: any;
+  pos: any;
+  setDefaultEncoding: any;
+  sftp: any;
+  start: any;
+  constructor(sftp, path, options) {
+    if (options === undefined) options = {};
+    else if (typeof options === "string") options = { encoding: options };
+    else if (options === null || typeof options !== "object")
+      throw new TypeError('"options" argument must be a string or an object');
+    else options = Object.create(options);
 
-  // For backwards compat do not emit close on destroy.
-  options.emitClose = false;
-  options.autoDestroy = false; // Node 14 major change.
+    // For backwards compat do not emit close on destroy.
+    options.emitClose = false;
+    options.autoDestroy = false; // Node 14 major change.
 
-  WritableStream.call(this, options);
+    // @ts-expect-error TS(2345): Argument of type 'this' is not assignable to param... Remove this comment to see the full error message
+    WritableStream.call(this, options);
 
-  this.path = path;
-  this.flags = options.flags === undefined ? 'w' : options.flags;
-  this.mode = options.mode === undefined ? 0o666 : options.mode;
+    this.path = path;
+    this.flags = options.flags === undefined ? "w" : options.flags;
+    this.mode = options.mode === undefined ? 0o666 : options.mode;
 
-  this.start = options.start;
-  this.autoClose = options.autoClose === undefined ? true : options.autoClose;
-  this.pos = 0;
-  this.bytesWritten = 0;
-  this.isClosed = false;
+    this.start = options.start;
+    this.autoClose = options.autoClose === undefined ? true : options.autoClose;
+    this.pos = 0;
+    this.bytesWritten = 0;
+    this.isClosed = false;
 
-  this.handle = options.handle === undefined ? null : options.handle;
-  this.sftp = sftp;
-  this._opening = false;
-
-  if (this.start !== undefined) {
-    checkPosition(this.start, 'start');
-
-    this.pos = this.start;
-  }
-
-  if (options.encoding)
-    this.setDefaultEncoding(options.encoding);
-
-  // Node v6.x only
-  this.on('finish', function() {
-    if (this._writableState.finalCalled)
-      return;
-    if (this.autoClose)
-      this.destroy();
-  });
-
-  if (!Buffer.isBuffer(this.handle))
-    this.open();
-}
-inherits(WriteStream, WritableStream);
-
-WriteStream.prototype._final = function(cb) {
-  if (this.autoClose)
-    this.destroy();
-  cb();
-};
-
-WriteStream.prototype.open = function() {
-  if (this._opening)
-    return;
-
-  this._opening = true;
-
-  this.sftp.open(this.path, this.flags, this.mode, (er, handle) => {
+    this.handle = options.handle === undefined ? null : options.handle;
+    this.sftp = sftp;
     this._opening = false;
 
-    if (er) {
-      this.emit('error', er);
-      if (this.autoClose)
-        this.destroy();
-      return;
+    if (this.start !== undefined) {
+      checkPosition(this.start, "start");
+
+      this.pos = this.start;
     }
 
-    this.handle = handle;
+    if (options.encoding) this.setDefaultEncoding(options.encoding);
 
-    const tryAgain = (err) => {
-      if (err) {
-        // Try chmod() for sftp servers that may not support fchmod() for
-        // whatever reason
-        this.sftp.chmod(this.path, this.mode, (err_) => tryAgain());
+    // Node v6.x only
+    this.on("finish", function (this: any) {
+      if (this._writableState.finalCalled) return;
+      if (this.autoClose) this.destroy();
+    });
+
+    if (!Buffer.isBuffer(this.handle)) this.open();
+  }
+
+  _final(cb) {
+    if (this.autoClose) this.destroy();
+    cb();
+  }
+
+  open() {
+    if (this._opening) return;
+
+    this._opening = true;
+
+    this.sftp.open(this.path, this.flags, this.mode, (er, handle) => {
+      this._opening = false;
+
+      if (er) {
+        this.emit("error", er);
+        if (this.autoClose) this.destroy();
         return;
       }
 
-      // SFTPv3 requires absolute offsets, no matter the open flag used
-      if (this.flags[0] === 'a') {
-        const tryStat = (err, st) => {
-          if (err) {
-            // Try stat() for sftp servers that may not support fstat() for
-            // whatever reason
-            this.sftp.stat(this.path, (err_, st_) => {
-              if (err_) {
-                this.destroy();
-                this.emit('error', err);
-                return;
-              }
-              tryStat(null, st_);
-            });
-            return;
-          }
+      this.handle = handle;
 
-          this.pos = st.size;
-          this.emit('open', handle);
-          this.emit('ready');
-        };
+      const tryAgain = (err) => {
+        if (err) {
+          // Try chmod() for sftp servers that may not support fchmod() for
+          // whatever reason
+          // @ts-expect-error TS(2554): Expected 1 arguments, but got 0.
+          this.sftp.chmod(this.path, this.mode, (err_) => tryAgain());
+          return;
+        }
 
-        this.sftp.fstat(handle, tryStat);
-        return;
+        // SFTPv3 requires absolute offsets, no matter the open flag used
+        if (this.flags[0] === "a") {
+          const tryStat = (err, { size }) => {
+            if (err) {
+              // Try stat() for sftp servers that may not support fstat() for
+              // whatever reason
+              this.sftp.stat(this.path, (err_, st_) => {
+                if (err_) {
+                  this.destroy();
+                  this.emit("error", err);
+                  return;
+                }
+                tryStat(null, st_);
+              });
+              return;
+            }
+
+            this.pos = size;
+            this.emit("open", handle);
+            this.emit("ready");
+          };
+
+          this.sftp.fstat(handle, tryStat);
+          return;
+        }
+
+        this.emit("open", handle);
+        this.emit("ready");
+      };
+
+      this.sftp.fchmod(handle, this.mode, tryAgain);
+    });
+  }
+
+  _write(data, encoding, cb) {
+    if (!Buffer.isBuffer(data)) {
+      const err = new ERR_INVALID_ARG_TYPE("data", "Buffer", data);
+      return this.emit("error", err);
+    }
+
+    if (!Buffer.isBuffer(this.handle)) {
+      return this.once("open", function (this: any) {
+        this._write(data, encoding, cb);
+      });
+    }
+
+    this.sftp.write(
+      this.handle,
+      data,
+      0,
+      data.length,
+      this.pos,
+      (er, bytes) => {
+        if (er) {
+          if (this.autoClose) this.destroy();
+          return cb(er);
+        }
+        this.bytesWritten += bytes;
+        cb();
       }
+    );
 
-      this.emit('open', handle);
-      this.emit('ready');
+    this.pos += data.length;
+  }
+
+  _writev(data, cb) {
+    if (!Buffer.isBuffer(this.handle)) {
+      return this.once("open", function (this: any) {
+        this._writev(data, cb);
+      });
+    }
+
+    const sftp = this.sftp;
+    const handle = this.handle;
+    let writesLeft = data.length;
+
+    const onwrite = (er, bytes) => {
+      if (er) {
+        this.destroy();
+        return cb(er);
+      }
+      this.bytesWritten += bytes;
+      if (--writesLeft === 0) cb();
     };
 
-    this.sftp.fchmod(handle, this.mode, tryAgain);
-  });
-};
+    // TODO: try to combine chunks to reduce number of requests to the server?
+    for (let i = 0; i < data.length; ++i) {
+      const chunk = data[i].chunk;
 
-WriteStream.prototype._write = function(data, encoding, cb) {
-  if (!Buffer.isBuffer(data)) {
-    const err = new ERR_INVALID_ARG_TYPE('data', 'Buffer', data);
-    return this.emit('error', err);
-  }
-
-  if (!Buffer.isBuffer(this.handle)) {
-    return this.once('open', function() {
-      this._write(data, encoding, cb);
-    });
-  }
-
-  this.sftp.write(this.handle,
-                  data,
-                  0,
-                  data.length,
-                  this.pos,
-                  (er, bytes) => {
-    if (er) {
-      if (this.autoClose)
-        this.destroy();
-      return cb(er);
+      sftp.write(handle, chunk, 0, chunk.length, this.pos, onwrite);
+      this.pos += chunk.length;
     }
-    this.bytesWritten += bytes;
-    cb();
-  });
-
-  this.pos += data.length;
-};
-
-WriteStream.prototype._writev = function(data, cb) {
-  if (!Buffer.isBuffer(this.handle)) {
-    return this.once('open', function() {
-      this._writev(data, cb);
-    });
   }
 
-  const sftp = this.sftp;
-  const handle = this.handle;
-  let writesLeft = data.length;
-
-  const onwrite = (er, bytes) => {
-    if (er) {
-      this.destroy();
-      return cb(er);
+  close(cb) {
+    if (cb) {
+      if (this.isClosed) {
+        process.nextTick(cb);
+        return;
+      }
+      this.on("close", cb);
     }
-    this.bytesWritten += bytes;
-    if (--writesLeft === 0)
-      cb();
-  };
 
-  // TODO: try to combine chunks to reduce number of requests to the server?
-  for (let i = 0; i < data.length; ++i) {
-    const chunk = data[i].chunk;
+    // If we are not autoClosing, we should call
+    // destroy on 'finish'.
+    if (!this.autoClose) this.on("finish", this.destroy.bind(this));
 
-    sftp.write(handle, chunk, 0, chunk.length, this.pos, onwrite);
-    this.pos += chunk.length;
+    this.end();
   }
-};
 
-if (typeof WritableStream.prototype.destroy !== 'function')
+  get pending() {
+    return this.handle === null;
+  }
+}
+
+inherits(WriteStream, WritableStream);
+
+if (typeof WritableStream.prototype.destroy !== "function")
   WriteStream.prototype.destroy = ReadStream.prototype.destroy;
 
+// @ts-expect-error TS(2551): Property '_destroy' does not exist on type 'WriteS... Remove this comment to see the full error message
 WriteStream.prototype._destroy = ReadStream.prototype._destroy;
-WriteStream.prototype.close = function(cb) {
-  if (cb) {
-    if (this.isClosed) {
-      process.nextTick(cb);
-      return;
-    }
-    this.on('close', cb);
-  }
-
-  // If we are not autoClosing, we should call
-  // destroy on 'finish'.
-  if (!this.autoClose)
-    this.on('finish', this.destroy.bind(this));
-
-  this.end();
-};
 
 // There is no shutdown() for files.
-WriteStream.prototype.destroySoon = WriteStream.prototype.end;
+(WriteStream.prototype as any).destroySoon = WriteStream.prototype.end;
 
-Object.defineProperty(WriteStream.prototype, 'pending', {
-  get() {
-    return this.handle === null;
-  },
-  configurable: true
-});
 // =============================================================================
 
-module.exports = {
+export default {
   flagsToString,
   OPEN_MODE,
   SFTP,

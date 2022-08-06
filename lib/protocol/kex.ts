@@ -1,6 +1,4 @@
-'use strict';
-
-const {
+import {
   createDiffieHellman,
   createDiffieHellmanGroup,
   createECDH,
@@ -9,11 +7,11 @@ const {
   diffieHellman,
   generateKeyPairSync,
   randomFillSync,
-} = require('crypto');
+} from "crypto";
 
-const { Ber } = require('asn1');
+import { Ber } from "asn1";
 
-const {
+import {
   COMPAT,
   curve25519Supported,
   DEFAULT_KEX,
@@ -23,15 +21,12 @@ const {
   DEFAULT_COMPRESSION,
   DISCONNECT_REASON,
   MESSAGE,
-} = require('./constants.js');
-const {
-  CIPHER_INFO,
-  createCipher,
-  createDecipher,
-  MAC_INFO,
-} = require('./crypto.js');
-const { parseDERKey } = require('./keyParser.js');
-const {
+} from "./constants";
+
+import { CIPHER_INFO, createCipher, createDecipher, MAC_INFO } from "./crypto";
+import { parseDERKey } from "./keyParser";
+
+import {
   bufferFill,
   bufferParser,
   convertSignature,
@@ -39,15 +34,16 @@ const {
   FastBuffer,
   sigSSHToASN1,
   writeUInt32BE,
-} = require('./utils.js');
-const {
+} from "./utils";
+
+import {
   PacketReader,
   PacketWriter,
   ZlibPacketReader,
   ZlibPacketWriter,
-} = require('./zlib.js');
+} from "./zlib";
 
-let MESSAGE_HANDLERS;
+import { MESSAGE_HANDLERS } from "./handlers";
 
 const GEX_MIN_BITS = 2048; // RFC 8270
 const GEX_MAX_BITS = 8192; // RFC 8270
@@ -55,7 +51,7 @@ const GEX_MAX_BITS = 8192; // RFC 8270
 const EMPTY_BUFFER = Buffer.alloc(0);
 
 // Client/Server
-function kexinit(self) {
+export function kexinit(self) {
   /*
     byte         SSH_MSG_KEXINIT
     byte[16]     cookie (random bytes)
@@ -79,7 +75,7 @@ function kexinit(self) {
     let kex = entry.array;
     let found = false;
     for (let i = 0; i < kex.length; ++i) {
-      if (kex[i].includes('group-exchange')) {
+      if (kex[i].includes("group-exchange")) {
         if (!found) {
           found = true;
           // Copy array lazily
@@ -90,8 +86,8 @@ function kexinit(self) {
     }
     if (found) {
       let len = 1 + 16 + self._offer.totalSize + 1 + 4;
-      const newKexBuf = Buffer.from(kex.join(','));
-      len -= (entry.buffer.length - newKexBuf.length);
+      const newKexBuf = Buffer.from(kex.join(","));
+      len -= entry.buffer.length - newKexBuf.length;
 
       const all = self._offer.lists.all;
       const rest = new Uint8Array(
@@ -112,7 +108,7 @@ function kexinit(self) {
     self._offer.copyAllTo(payload, 17);
   }
 
-  self._debug && self._debug('Outbound: Sending KEXINIT');
+  self._debug && self._debug("Outbound: Sending KEXINIT");
 
   payload[0] = MESSAGE.KEXINIT;
   randomFillSync(payload, 1, 16);
@@ -152,7 +148,7 @@ function handleKexInit(self, payload) {
     boolean      first_kex_packet_follows
     uint32       0 (reserved for future extension)
   */
-  const init = {
+  const init: any = {
     kex: undefined,
     serverHostKey: undefined,
     cs: {
@@ -171,27 +167,29 @@ function handleKexInit(self, payload) {
 
   bufferParser.init(payload, 17);
 
-  if ((init.kex = bufferParser.readList()) === undefined
-      || (init.serverHostKey = bufferParser.readList()) === undefined
-      || (init.cs.cipher = bufferParser.readList()) === undefined
-      || (init.sc.cipher = bufferParser.readList()) === undefined
-      || (init.cs.mac = bufferParser.readList()) === undefined
-      || (init.sc.mac = bufferParser.readList()) === undefined
-      || (init.cs.compress = bufferParser.readList()) === undefined
-      || (init.sc.compress = bufferParser.readList()) === undefined
-      || (init.cs.lang = bufferParser.readList()) === undefined
-      || (init.sc.lang = bufferParser.readList()) === undefined) {
+  if (
+    (init.kex = bufferParser.readList()) === undefined ||
+    (init.serverHostKey = bufferParser.readList()) === undefined ||
+    (init.cs.cipher = bufferParser.readList()) === undefined ||
+    (init.sc.cipher = bufferParser.readList()) === undefined ||
+    (init.cs.mac = bufferParser.readList()) === undefined ||
+    (init.sc.mac = bufferParser.readList()) === undefined ||
+    (init.cs.compress = bufferParser.readList()) === undefined ||
+    (init.sc.compress = bufferParser.readList()) === undefined ||
+    (init.cs.lang = bufferParser.readList()) === undefined ||
+    (init.sc.lang = bufferParser.readList()) === undefined
+  ) {
     bufferParser.clear();
     return doFatalError(
       self,
-      'Received malformed KEXINIT',
-      'handshake',
+      "Received malformed KEXINIT",
+      "handshake",
       DISCONNECT_REASON.KEY_EXCHANGE_FAILED
     );
   }
 
   const pos = bufferParser.pos();
-  const firstFollows = (pos < payload.length && payload[pos] === 1);
+  const firstFollows = pos < payload.length && payload[pos] === 1;
   bufferParser.clear();
 
   const local = self._offer;
@@ -201,7 +199,7 @@ function handleKexInit(self, payload) {
   if (self._compatFlags & COMPAT.BAD_DHGEX) {
     let found = false;
     for (let i = 0; i < localKex.length; ++i) {
-      if (localKex[i].indexOf('group-exchange') !== -1) {
+      if (localKex[i].includes("group-exchange")) {
         if (!found) {
           found = true;
           // Copy array lazily
@@ -217,7 +215,7 @@ function handleKexInit(self, payload) {
   let i;
   const debug = self._debug;
 
-  debug && debug('Inbound: Handshake in progress');
+  debug && debug("Inbound: Handshake in progress");
 
   // Key exchange method =======================================================
   debug && debug(`Handshake: (local) KEX method: ${localKex}`);
@@ -230,16 +228,18 @@ function handleKexInit(self, payload) {
     clientList = localKex;
   }
   // Check for agreeable key exchange algorithm
-  for (i = 0;
-       i < clientList.length && serverList.indexOf(clientList[i]) === -1;
-       ++i);
+  for (
+    i = 0;
+    i < clientList.length && !serverList.includes(clientList[i]);
+    ++i
+  );
   if (i === clientList.length) {
     // No suitable match found!
-    debug && debug('Handshake: No matching key exchange algorithm');
+    debug && debug("Handshake: No matching key exchange algorithm");
     return doFatalError(
       self,
-      'Handshake failed: no matching key exchange algorithm',
-      'handshake',
+      "Handshake failed: no matching key exchange algorithm",
+      "handshake",
       DISCONNECT_REASON.KEY_EXCHANGE_FAILED
     );
   }
@@ -250,13 +250,11 @@ function handleKexInit(self, payload) {
     self._skipNextInboundPacket = true;
   }
 
-
   // Server host key format ====================================================
   const localSrvHostKey = local.lists.serverHostKey.array;
   debug && debug(`Handshake: (local) Host key format: ${localSrvHostKey}`);
-  debug && debug(
-    `Handshake: (remote) Host key format: ${remote.serverHostKey}`
-  );
+  debug &&
+    debug(`Handshake: (remote) Host key format: ${remote.serverHostKey}`);
   if (self._server) {
     serverList = localSrvHostKey;
     clientList = remote.serverHostKey;
@@ -265,22 +263,23 @@ function handleKexInit(self, payload) {
     clientList = localSrvHostKey;
   }
   // Check for agreeable server host key format
-  for (i = 0;
-       i < clientList.length && serverList.indexOf(clientList[i]) === -1;
-       ++i);
+  for (
+    i = 0;
+    i < clientList.length && !serverList.includes(clientList[i]);
+    ++i
+  );
   if (i === clientList.length) {
     // No suitable match found!
-    debug && debug('Handshake: No matching host key format');
+    debug && debug("Handshake: No matching host key format");
     return doFatalError(
       self,
-      'Handshake failed: no matching host key format',
-      'handshake',
+      "Handshake failed: no matching host key format",
+      "handshake",
       DISCONNECT_REASON.KEY_EXCHANGE_FAILED
     );
   }
   init.serverHostKey = clientList[i];
   debug && debug(`Handshake: Host key format: ${clientList[i]}`);
-
 
   // Client->Server cipher =====================================================
   const localCSCipher = local.lists.cs.cipher.array;
@@ -294,22 +293,23 @@ function handleKexInit(self, payload) {
     clientList = localCSCipher;
   }
   // Check for agreeable client->server cipher
-  for (i = 0;
-       i < clientList.length && serverList.indexOf(clientList[i]) === -1;
-       ++i);
+  for (
+    i = 0;
+    i < clientList.length && !serverList.includes(clientList[i]);
+    ++i
+  );
   if (i === clientList.length) {
     // No suitable match found!
-    debug && debug('Handshake: No matching C->S cipher');
+    debug && debug("Handshake: No matching C->S cipher");
     return doFatalError(
       self,
-      'Handshake failed: no matching C->S cipher',
-      'handshake',
+      "Handshake failed: no matching C->S cipher",
+      "handshake",
       DISCONNECT_REASON.KEY_EXCHANGE_FAILED
     );
   }
   init.cs.cipher = clientList[i];
   debug && debug(`Handshake: C->S Cipher: ${clientList[i]}`);
-
 
   // Server->Client cipher =====================================================
   const localSCCipher = local.lists.sc.cipher.array;
@@ -323,30 +323,31 @@ function handleKexInit(self, payload) {
     clientList = localSCCipher;
   }
   // Check for agreeable server->client cipher
-  for (i = 0;
-       i < clientList.length && serverList.indexOf(clientList[i]) === -1;
-       ++i);
+  for (
+    i = 0;
+    i < clientList.length && !serverList.includes(clientList[i]);
+    ++i
+  );
   if (i === clientList.length) {
     // No suitable match found!
-    debug && debug('Handshake: No matching S->C cipher');
+    debug && debug("Handshake: No matching S->C cipher");
     return doFatalError(
       self,
-      'Handshake failed: no matching S->C cipher',
-      'handshake',
+      "Handshake failed: no matching S->C cipher",
+      "handshake",
       DISCONNECT_REASON.KEY_EXCHANGE_FAILED
     );
   }
   init.sc.cipher = clientList[i];
   debug && debug(`Handshake: S->C cipher: ${clientList[i]}`);
 
-
   // Client->Server MAC ========================================================
   const localCSMAC = local.lists.cs.mac.array;
   debug && debug(`Handshake: (local) C->S MAC: ${localCSMAC}`);
   debug && debug(`Handshake: (remote) C->S MAC: ${remote.cs.mac}`);
-  if (CIPHER_INFO[init.cs.cipher].authLen > 0) {
-    init.cs.mac = '';
-    debug && debug('Handshake: C->S MAC: <implicit>');
+  if (CIPHER_INFO[init.cs.cipher as keyof typeof CIPHER_INFO].authLen > 0) {
+    init.cs.mac = "";
+    debug && debug("Handshake: C->S MAC: <implicit>");
   } else {
     if (self._server) {
       serverList = localCSMAC;
@@ -356,16 +357,18 @@ function handleKexInit(self, payload) {
       clientList = localCSMAC;
     }
     // Check for agreeable client->server hmac algorithm
-    for (i = 0;
-         i < clientList.length && serverList.indexOf(clientList[i]) === -1;
-         ++i);
+    for (
+      i = 0;
+      i < clientList.length && !serverList.includes(clientList[i]);
+      ++i
+    );
     if (i === clientList.length) {
       // No suitable match found!
-      debug && debug('Handshake: No matching C->S MAC');
+      debug && debug("Handshake: No matching C->S MAC");
       return doFatalError(
         self,
-        'Handshake failed: no matching C->S MAC',
-        'handshake',
+        "Handshake failed: no matching C->S MAC",
+        "handshake",
         DISCONNECT_REASON.KEY_EXCHANGE_FAILED
       );
     }
@@ -373,14 +376,13 @@ function handleKexInit(self, payload) {
     debug && debug(`Handshake: C->S MAC: ${clientList[i]}`);
   }
 
-
   // Server->Client MAC ========================================================
   const localSCMAC = local.lists.sc.mac.array;
   debug && debug(`Handshake: (local) S->C MAC: ${localSCMAC}`);
   debug && debug(`Handshake: (remote) S->C MAC: ${remote.sc.mac}`);
   if (CIPHER_INFO[init.sc.cipher].authLen > 0) {
-    init.sc.mac = '';
-    debug && debug('Handshake: S->C MAC: <implicit>');
+    init.sc.mac = "";
+    debug && debug("Handshake: S->C MAC: <implicit>");
   } else {
     if (self._server) {
       serverList = localSCMAC;
@@ -390,23 +392,24 @@ function handleKexInit(self, payload) {
       clientList = localSCMAC;
     }
     // Check for agreeable server->client hmac algorithm
-    for (i = 0;
-         i < clientList.length && serverList.indexOf(clientList[i]) === -1;
-         ++i);
+    for (
+      i = 0;
+      i < clientList.length && !serverList.includes(clientList[i]);
+      ++i
+    );
     if (i === clientList.length) {
       // No suitable match found!
-      debug && debug('Handshake: No matching S->C MAC');
+      debug && debug("Handshake: No matching S->C MAC");
       return doFatalError(
         self,
-        'Handshake failed: no matching S->C MAC',
-        'handshake',
+        "Handshake failed: no matching S->C MAC",
+        "handshake",
         DISCONNECT_REASON.KEY_EXCHANGE_FAILED
       );
     }
     init.sc.mac = clientList[i];
     debug && debug(`Handshake: S->C MAC: ${clientList[i]}`);
   }
-
 
   // Client->Server compression ================================================
   const localCSCompress = local.lists.cs.compress.array;
@@ -420,22 +423,23 @@ function handleKexInit(self, payload) {
     clientList = localCSCompress;
   }
   // Check for agreeable client->server compression algorithm
-  for (i = 0;
-       i < clientList.length && serverList.indexOf(clientList[i]) === -1;
-       ++i);
+  for (
+    i = 0;
+    i < clientList.length && !serverList.includes(clientList[i]);
+    ++i
+  );
   if (i === clientList.length) {
     // No suitable match found!
-    debug && debug('Handshake: No matching C->S compression');
+    debug && debug("Handshake: No matching C->S compression");
     return doFatalError(
       self,
-      'Handshake failed: no matching C->S compression',
-      'handshake',
+      "Handshake failed: no matching C->S compression",
+      "handshake",
       DISCONNECT_REASON.KEY_EXCHANGE_FAILED
     );
   }
   init.cs.compress = clientList[i];
   debug && debug(`Handshake: C->S compression: ${clientList[i]}`);
-
 
   // Server->Client compression ================================================
   const localSCCompress = local.lists.sc.compress.array;
@@ -449,24 +453,26 @@ function handleKexInit(self, payload) {
     clientList = localSCCompress;
   }
   // Check for agreeable server->client compression algorithm
-  for (i = 0;
-       i < clientList.length && serverList.indexOf(clientList[i]) === -1;
-       ++i);
+  for (
+    i = 0;
+    i < clientList.length && !serverList.includes(clientList[i]);
+    ++i
+  );
   if (i === clientList.length) {
     // No suitable match found!
-    debug && debug('Handshake: No matching S->C compression');
+    debug && debug("Handshake: No matching S->C compression");
     return doFatalError(
       self,
-      'Handshake failed: no matching S->C compression',
-      'handshake',
+      "Handshake failed: no matching S->C compression",
+      "handshake",
       DISCONNECT_REASON.KEY_EXCHANGE_FAILED
     );
   }
   init.sc.compress = clientList[i];
   debug && debug(`Handshake: S->C compression: ${clientList[i]}`);
 
-  init.cs.lang = '';
-  init.sc.lang = '';
+  init.cs.lang = "";
+  init.sc.lang = "";
 
   // XXX: hack -- find a better way to do this
   if (self._kex) {
@@ -505,10 +511,34 @@ const createKeyExchange = (() => {
   }
 
   class KeyExchange {
+    _dh: any;
+    _dhData: any;
+    _finished: any;
+    _hostKey: any;
+    _hostVerified: any;
+    _identRaw: any;
+    _kexinit: any;
+    _maxBits: any;
+    _minBits: any;
+    _prefBits: any;
+    _protocol: any;
+    _public: any;
+    _receivedNEWKEYS: any;
+    _remoteIdentRaw: any;
+    _remoteKexinit: any;
+    _sentNEWKEYS: any;
+    _sig: any;
+    _step: any;
+    generateKeys: any;
+    getDHParams: any;
+    hashName: any;
+    negotiated: any;
+    sessionID: any;
+    type: any;
     constructor(negotiated, protocol, remoteKexinit) {
       this._protocol = protocol;
 
-      this.sessionID = (protocol._kex ? protocol._kex.sessionID : undefined);
+      this.sessionID = protocol._kex ? protocol._kex.sessionID : undefined;
       this.negotiated = negotiated;
       this._step = 1;
       this._public = null;
@@ -528,8 +558,7 @@ const createKeyExchange = (() => {
       this._sig = undefined;
     }
     finish() {
-      if (this._finished)
-        return false;
+      if (this._finished) return false;
       this._finished = true;
 
       const isServer = this._protocol._server;
@@ -538,9 +567,8 @@ const createKeyExchange = (() => {
       const pubKey = this.convertPublicKey(this._dhData);
       let secret = this.computeSecret(this._dhData);
       if (secret instanceof Error) {
-        secret.message =
-          `Error while computing DH secret (${this.type}): ${secret.message}`;
-        secret.level = 'handshake';
+        secret.message = `Error while computing DH secret (${this.type}): ${secret.message}`;
+        (secret as any).level = "handshake";
         return doFatalError(
           this._protocol,
           secret,
@@ -550,20 +578,20 @@ const createKeyExchange = (() => {
 
       const hash = createHash(this.hashName);
       // V_C
-      hashString(hash, (isServer ? this._remoteIdentRaw : this._identRaw));
+      hashString(hash, isServer ? this._remoteIdentRaw : this._identRaw);
       // "V_S"
-      hashString(hash, (isServer ? this._identRaw : this._remoteIdentRaw));
+      hashString(hash, isServer ? this._identRaw : this._remoteIdentRaw);
       // "I_C"
-      hashString(hash, (isServer ? this._remoteKexinit : this._kexinit));
+      hashString(hash, isServer ? this._remoteKexinit : this._kexinit);
       // "I_S"
-      hashString(hash, (isServer ? this._kexinit : this._remoteKexinit));
+      hashString(hash, isServer ? this._kexinit : this._remoteKexinit);
       // "K_S"
-      const serverPublicHostKey = (isServer
-                                   ? this._hostKey.getPublicSSH()
-                                   : this._hostKey);
+      const serverPublicHostKey = isServer
+        ? this._hostKey.getPublicSSH()
+        : this._hostKey;
       hashString(hash, serverPublicHostKey);
 
-      if (this.type === 'groupex') {
+      if (this.type === "groupex") {
         // Group exchange-specific
         const params = this.getDHParams();
         const num = Buffer.allocUnsafe(4);
@@ -583,9 +611,9 @@ const createKeyExchange = (() => {
       }
 
       // method-specific data sent by client
-      hashString(hash, (isServer ? pubKey : this.getPublicKey()));
+      hashString(hash, isServer ? pubKey : this.getPublicKey());
       // method-specific data sent by server
-      const serverPublicKey = (isServer ? this.getPublicKey() : pubKey);
+      const serverPublicKey = isServer ? this.getPublicKey() : pubKey;
       hashString(hash, serverPublicKey);
       // shared secret ("K")
       hashString(hash, secret);
@@ -600,8 +628,8 @@ const createKeyExchange = (() => {
         if (!sigType) {
           return doFatalError(
             this._protocol,
-            'Malformed packet while reading signature',
-            'handshake',
+            "Malformed packet while reading signature",
+            "handshake",
             DISCONNECT_REASON.KEY_EXCHANGE_FAILED
           );
         }
@@ -609,9 +637,9 @@ const createKeyExchange = (() => {
         if (sigType !== negotiated.serverHostKey) {
           return doFatalError(
             this._protocol,
-            `Wrong signature type: ${sigType}, `
-              + `expected: ${negotiated.serverHostKey}`,
-            'handshake',
+            `Wrong signature type: ${sigType}, ` +
+              `expected: ${negotiated.serverHostKey}`,
+            "handshake",
             DISCONNECT_REASON.KEY_EXCHANGE_FAILED
           );
         }
@@ -624,8 +652,8 @@ const createKeyExchange = (() => {
         if (sigValue === undefined) {
           return doFatalError(
             this._protocol,
-            'Malformed packet while reading signature',
-            'handshake',
+            "Malformed packet while reading signature",
+            "handshake",
             DISCONNECT_REASON.KEY_EXCHANGE_FAILED
           );
         }
@@ -633,8 +661,8 @@ const createKeyExchange = (() => {
         if (!(sigValue = sigSSHToASN1(sigValue, sigType))) {
           return doFatalError(
             this._protocol,
-            'Malformed signature',
-            'handshake',
+            "Malformed signature",
+            "handshake",
             DISCONNECT_REASON.KEY_EXCHANGE_FAILED
           );
         }
@@ -647,7 +675,7 @@ const createKeyExchange = (() => {
           bufferParser.clear();
           parsedHostKey = parseDERKey(hostKey, name);
           if (parsedHostKey instanceof Error) {
-            parsedHostKey.level = 'handshake';
+            (parsedHostKey as any).level = "handshake";
             return doFatalError(
               this._protocol,
               parsedHostKey,
@@ -659,53 +687,59 @@ const createKeyExchange = (() => {
         let hashAlgo;
         // Check if we need to override the default hash algorithm
         switch (this.negotiated.serverHostKey) {
-          case 'rsa-sha2-256': hashAlgo = 'sha256'; break;
-          case 'rsa-sha2-512': hashAlgo = 'sha512'; break;
+          case "rsa-sha2-256":
+            hashAlgo = "sha256";
+            break;
+          case "rsa-sha2-512":
+            hashAlgo = "sha512";
+            break;
         }
 
-        this._protocol._debug
-          && this._protocol._debug('Verifying signature ...');
+        this._protocol._debug &&
+          this._protocol._debug("Verifying signature ...");
 
         const verified = parsedHostKey.verify(exchangeHash, sigValue, hashAlgo);
         if (verified !== true) {
           if (verified instanceof Error) {
-            this._protocol._debug && this._protocol._debug(
-              `Signature verification failed: ${verified.stack}`
-            );
+            this._protocol._debug &&
+              this._protocol._debug(
+                `Signature verification failed: ${verified.stack}`
+              );
           } else {
-            this._protocol._debug && this._protocol._debug(
-              'Signature verification failed'
-            );
+            this._protocol._debug &&
+              this._protocol._debug("Signature verification failed");
           }
           return doFatalError(
             this._protocol,
-            'Handshake failed: signature verification failed',
-            'handshake',
+            "Handshake failed: signature verification failed",
+            "handshake",
             DISCONNECT_REASON.KEY_EXCHANGE_FAILED
           );
         }
-        this._protocol._debug && this._protocol._debug('Verified signature');
+        this._protocol._debug && this._protocol._debug("Verified signature");
       } else {
         // Server
 
         let hashAlgo;
         // Check if we need to override the default hash algorithm
         switch (this.negotiated.serverHostKey) {
-          case 'rsa-sha2-256': hashAlgo = 'sha256'; break;
-          case 'rsa-sha2-512': hashAlgo = 'sha512'; break;
+          case "rsa-sha2-256":
+            hashAlgo = "sha256";
+            break;
+          case "rsa-sha2-512":
+            hashAlgo = "sha512";
+            break;
         }
 
-        this._protocol._debug && this._protocol._debug(
-          'Generating signature ...'
-        );
+        this._protocol._debug &&
+          this._protocol._debug("Generating signature ...");
 
         let signature = this._hostKey.sign(exchangeHash, hashAlgo);
         if (signature instanceof Error) {
           return doFatalError(
             this._protocol,
-            'Handshake failed: signature generation failed for '
-              + `${this._hostKey.type} host key: ${signature.message}`,
-            'handshake',
+            `Handshake failed: signature generation failed for ${`${this._hostKey.type} host key: ${signature.message}`}`,
+            "handshake",
             DISCONNECT_REASON.KEY_EXCHANGE_FAILED
           );
         }
@@ -714,9 +748,8 @@ const createKeyExchange = (() => {
         if (signature === false) {
           return doFatalError(
             this._protocol,
-            'Handshake failed: signature conversion failed for '
-              + `${this._hostKey.type} host key`,
-            'handshake',
+            `Handshake failed: signature conversion failed for ${`${this._hostKey.type} host key`}`,
+            "handshake",
             DISCONNECT_REASON.KEY_EXCHANGE_FAILED
           );
         }
@@ -735,42 +768,47 @@ const createKeyExchange = (() => {
         const sigLen = 4 + sigTypeLen + 4 + signature.length;
         let p = this._protocol._packetRW.write.allocStartKEX;
         const packet = this._protocol._packetRW.write.alloc(
-          1
-            + 4 + serverPublicHostKey.length
-            + 4 + serverPublicKey.length
-            + 4 + sigLen,
+          1 +
+            4 +
+            serverPublicHostKey.length +
+            4 +
+            serverPublicKey.length +
+            4 +
+            sigLen,
           true
         );
 
         packet[p] = MESSAGE.KEXDH_REPLY;
 
         writeUInt32BE(packet, serverPublicHostKey.length, ++p);
-        packet.set(serverPublicHostKey, p += 4);
+        packet.set(serverPublicHostKey, (p += 4));
 
-        writeUInt32BE(packet,
-                      serverPublicKey.length,
-                      p += serverPublicHostKey.length);
-        packet.set(serverPublicKey, p += 4);
+        writeUInt32BE(
+          packet,
+          serverPublicKey.length,
+          (p += serverPublicHostKey.length)
+        );
+        packet.set(serverPublicKey, (p += 4));
 
-        writeUInt32BE(packet, sigLen, p += serverPublicKey.length);
+        writeUInt32BE(packet, sigLen, (p += serverPublicKey.length));
 
-        writeUInt32BE(packet, sigTypeLen, p += 4);
-        packet.utf8Write(sigType, p += 4, sigTypeLen);
+        writeUInt32BE(packet, sigTypeLen, (p += 4));
+        packet.utf8Write(sigType, (p += 4), sigTypeLen);
 
-        writeUInt32BE(packet, signature.length, p += sigTypeLen);
-        packet.set(signature, p += 4);
+        writeUInt32BE(packet, signature.length, (p += sigTypeLen));
+        packet.set(signature, (p += 4));
 
         if (this._protocol._debug) {
           let type;
           switch (this.type) {
-            case 'group':
-              type = 'KEXDH_REPLY';
+            case "group":
+              type = "KEXDH_REPLY";
               break;
-            case 'groupex':
-              type = 'KEXDH_GEX_REPLY';
+            case "groupex":
+              type = "KEXDH_GEX_REPLY";
               break;
             default:
-              type = 'KEXECDH_REPLY';
+              type = "KEXECDH_REPLY";
           }
           this._protocol._debug(`Outbound: Sending ${type}`);
         }
@@ -781,8 +819,7 @@ const createKeyExchange = (() => {
       trySendNEWKEYS(this);
 
       const completeHandshake = () => {
-        if (!this.sessionID)
-          this.sessionID = exchangeHash;
+        if (!this.sessionID) this.sessionID = exchangeHash;
 
         {
           const newSecret = Buffer.allocUnsafe(4 + secret.length);
@@ -796,71 +833,83 @@ const createKeyExchange = (() => {
         const csCipherInfo = CIPHER_INFO[negotiated.cs.cipher];
         const scCipherInfo = CIPHER_INFO[negotiated.sc.cipher];
 
-        const csIV = generateKEXVal(csCipherInfo.ivLen,
-                                    this.hashName,
-                                    secret,
-                                    exchangeHash,
-                                    this.sessionID,
-                                    'A');
-        const scIV = generateKEXVal(scCipherInfo.ivLen,
-                                    this.hashName,
-                                    secret,
-                                    exchangeHash,
-                                    this.sessionID,
-                                    'B');
-        const csKey = generateKEXVal(csCipherInfo.keyLen,
-                                     this.hashName,
-                                     secret,
-                                     exchangeHash,
-                                     this.sessionID,
-                                     'C');
-        const scKey = generateKEXVal(scCipherInfo.keyLen,
-                                     this.hashName,
-                                     secret,
-                                     exchangeHash,
-                                     this.sessionID,
-                                     'D');
+        const csIV = generateKEXVal(
+          csCipherInfo.ivLen,
+          this.hashName,
+          secret,
+          exchangeHash,
+          this.sessionID,
+          "A"
+        );
+        const scIV = generateKEXVal(
+          scCipherInfo.ivLen,
+          this.hashName,
+          secret,
+          exchangeHash,
+          this.sessionID,
+          "B"
+        );
+        const csKey = generateKEXVal(
+          csCipherInfo.keyLen,
+          this.hashName,
+          secret,
+          exchangeHash,
+          this.sessionID,
+          "C"
+        );
+        const scKey = generateKEXVal(
+          scCipherInfo.keyLen,
+          this.hashName,
+          secret,
+          exchangeHash,
+          this.sessionID,
+          "D"
+        );
         let csMacInfo;
         let csMacKey;
         if (!csCipherInfo.authLen) {
           csMacInfo = MAC_INFO[negotiated.cs.mac];
-          csMacKey = generateKEXVal(csMacInfo.len,
-                                    this.hashName,
-                                    secret,
-                                    exchangeHash,
-                                    this.sessionID,
-                                    'E');
+          csMacKey = generateKEXVal(
+            csMacInfo.len,
+            this.hashName,
+            secret,
+            exchangeHash,
+            this.sessionID,
+            "E"
+          );
         }
         let scMacInfo;
         let scMacKey;
         if (!scCipherInfo.authLen) {
           scMacInfo = MAC_INFO[negotiated.sc.mac];
-          scMacKey = generateKEXVal(scMacInfo.len,
-                                    this.hashName,
-                                    secret,
-                                    exchangeHash,
-                                    this.sessionID,
-                                    'F');
+          scMacKey = generateKEXVal(
+            scMacInfo.len,
+            this.hashName,
+            secret,
+            exchangeHash,
+            this.sessionID,
+            "F"
+          );
         }
 
         const config = {
           inbound: {
             onPayload: this._protocol._onPayload,
             seqno: this._protocol._decipher.inSeqno,
-            decipherInfo: (!isServer ? scCipherInfo : csCipherInfo),
-            decipherIV: (!isServer ? scIV : csIV),
-            decipherKey: (!isServer ? scKey : csKey),
-            macInfo: (!isServer ? scMacInfo : csMacInfo),
-            macKey: (!isServer ? scMacKey : csMacKey),
+            decipherInfo: !isServer ? scCipherInfo : csCipherInfo,
+            decipherIV: !isServer ? scIV : csIV,
+            decipherKey: !isServer ? scKey : csKey,
+            macInfo: !isServer ? scMacInfo : csMacInfo,
+            macKey: !isServer ? scMacKey : csMacKey,
           },
           outbound: {
             onWrite: this._protocol._onWrite,
             seqno: this._protocol._cipher.outSeqno,
-            cipherInfo: (isServer ? scCipherInfo : csCipherInfo),
-            cipherIV: (isServer ? scIV : csIV),
-            cipherKey: (isServer ? scKey : csKey),
-            macInfo: (isServer ? scMacInfo : csMacInfo),
-            macKey: (isServer ? scMacKey : csMacKey),
+            cipherInfo: isServer ? scCipherInfo : csCipherInfo,
+            cipherIV: isServer ? scIV : csIV,
+            cipherKey: isServer ? scKey : csKey,
+            macInfo: isServer ? scMacInfo : csMacInfo,
+            macKey: isServer ? scMacKey : csMacKey,
           },
         };
         this._protocol._cipher && this._protocol._cipher.free();
@@ -868,67 +917,57 @@ const createKeyExchange = (() => {
         this._protocol._cipher = createCipher(config);
         this._protocol._decipher = createDecipher(config);
 
-        const rw = {
+        const rw: any = {
           read: undefined,
           write: undefined,
         };
         switch (negotiated.cs.compress) {
-          case 'zlib': // starts immediately
-            if (isServer)
-              rw.read = new ZlibPacketReader();
-            else
-              rw.write = new ZlibPacketWriter(this._protocol);
+          case "zlib": // starts immediately
+            if (isServer) rw.read = new ZlibPacketReader();
+            else rw.write = new ZlibPacketWriter(this._protocol);
             break;
-          case 'zlib@openssh.com':
+          // @ts-expect-error TS(7029): Fallthrough case in switch.
+          case "zlib@openssh.com":
             // Starts after successful user authentication
 
             if (this._protocol._authenticated) {
               // If a rekey happens and this compression method is selected and
               // we already authenticated successfully, we need to start
               // immediately instead
-              if (isServer)
-                rw.read = new ZlibPacketReader();
-              else
-                rw.write = new ZlibPacketWriter(this._protocol);
+              if (isServer) rw.read = new ZlibPacketReader();
+              else rw.write = new ZlibPacketWriter(this._protocol);
               break;
             }
           // FALLTHROUGH
           default:
             // none -- never any compression/decompression
 
-            if (isServer)
-              rw.read = new PacketReader();
-            else
-              rw.write = new PacketWriter(this._protocol);
+            if (isServer) rw.read = new PacketReader();
+            else rw.write = new PacketWriter(this._protocol);
         }
         switch (negotiated.sc.compress) {
-          case 'zlib': // starts immediately
-            if (isServer)
-              rw.write = new ZlibPacketWriter(this._protocol);
-            else
-              rw.read = new ZlibPacketReader();
+          case "zlib": // starts immediately
+            if (isServer) rw.write = new ZlibPacketWriter(this._protocol);
+            else rw.read = new ZlibPacketReader();
             break;
-          case 'zlib@openssh.com':
+          // @ts-expect-error TS(7029): Fallthrough case in switch.
+          case "zlib@openssh.com":
             // Starts after successful user authentication
 
             if (this._protocol._authenticated) {
               // If a rekey happens and this compression method is selected and
               // we already authenticated successfully, we need to start
               // immediately instead
-              if (isServer)
-                rw.write = new ZlibPacketWriter(this._protocol);
-              else
-                rw.read = new ZlibPacketReader();
+              if (isServer) rw.write = new ZlibPacketWriter(this._protocol);
+              else rw.read = new ZlibPacketReader();
               break;
             }
           // FALLTHROUGH
           default:
             // none -- never any compression/decompression
 
-            if (isServer)
-              rw.write = new PacketWriter(this._protocol);
-            else
-              rw.read = new PacketReader();
+            if (isServer) rw.write = new PacketWriter(this._protocol);
+            else rw.read = new PacketReader();
         }
         this._protocol._packetRW.read.cleanup();
         this._protocol._packetRW.write.cleanup();
@@ -949,8 +988,7 @@ const createKeyExchange = (() => {
 
         return false;
       };
-      if (!isServer)
-        return completeHandshake();
+      if (!isServer) return completeHandshake();
       this.finish = completeHandshake;
     }
 
@@ -959,11 +997,11 @@ const createKeyExchange = (() => {
         if (this._protocol._debug) {
           let type;
           switch (this.type) {
-            case 'group':
-              type = 'KEXDH_INIT';
+            case "group":
+              type = "KEXDH_INIT";
               break;
             default:
-              type = 'KEXECDH_INIT';
+              type = "KEXECDH_INIT";
           }
           this._protocol._debug(`Outbound: Sending ${type}`);
         }
@@ -977,7 +1015,7 @@ const createKeyExchange = (() => {
         );
         packet[p] = MESSAGE.KEXDH_INIT;
         writeUInt32BE(packet, pubKey.length, ++p);
-        packet.set(pubKey, p += 4);
+        packet.set(pubKey, (p += 4));
         this._protocol._cipher.encrypt(
           this._protocol._packetRW.write.finalize(packet, true)
         );
@@ -988,8 +1026,7 @@ const createKeyExchange = (() => {
 
       const key = this._public;
 
-      if (key)
-        return this.convertPublicKey(key);
+      if (key) return this.convertPublicKey(key);
     }
     convertPublicKey(key) {
       let newKey;
@@ -1033,13 +1070,11 @@ const createKeyExchange = (() => {
               return doFatalError(
                 this._protocol,
                 `Received packet ${type} instead of ${MESSAGE.KEXDH_INIT}`,
-                'handshake',
+                "handshake",
                 DISCONNECT_REASON.KEY_EXCHANGE_FAILED
               );
             }
-            this._protocol._debug && this._protocol._debug(
-              'Received DH Init'
-            );
+            this._protocol._debug && this._protocol._debug("Received DH Init");
             /*
               byte     SSH_MSG_KEXDH_INIT
                          / SSH_MSG_KEX_ECDH_INIT
@@ -1051,8 +1086,8 @@ const createKeyExchange = (() => {
             if (dhData === undefined) {
               return doFatalError(
                 this._protocol,
-                'Received malformed KEX*_INIT',
-                'handshake',
+                "Received malformed KEX*_INIT",
+                "handshake",
                 DISCONNECT_REASON.KEY_EXCHANGE_FAILED
               );
             }
@@ -1062,8 +1097,7 @@ const createKeyExchange = (() => {
 
             let hostKey =
               this._protocol._hostKeys[this.negotiated.serverHostKey];
-            if (Array.isArray(hostKey))
-              hostKey = hostKey[0];
+            if (Array.isArray(hostKey)) hostKey = hostKey[0];
             this._hostKey = hostKey;
 
             this.finish();
@@ -1073,13 +1107,11 @@ const createKeyExchange = (() => {
               return doFatalError(
                 this._protocol,
                 `Received packet ${type} instead of ${MESSAGE.KEXDH_REPLY}`,
-                'handshake',
+                "handshake",
                 DISCONNECT_REASON.KEY_EXCHANGE_FAILED
               );
             }
-            this._protocol._debug && this._protocol._debug(
-              'Received DH Reply'
-            );
+            this._protocol._debug && this._protocol._debug("Received DH Reply");
             /*
               byte      SSH_MSG_KEXDH_REPLY
                           / SSH_MSG_KEX_DH_GEX_REPLY
@@ -1092,14 +1124,16 @@ const createKeyExchange = (() => {
             let hostPubKey;
             let dhData;
             let sig;
-            if ((hostPubKey = bufferParser.readString()) === undefined
-                || (dhData = bufferParser.readString()) === undefined
-                || (sig = bufferParser.readString()) === undefined) {
+            if (
+              (hostPubKey = bufferParser.readString()) === undefined ||
+              (dhData = bufferParser.readString()) === undefined ||
+              (sig = bufferParser.readString()) === undefined
+            ) {
               bufferParser.clear();
               return doFatalError(
                 this._protocol,
-                'Received malformed KEX*_REPLY',
-                'handshake',
+                "Received malformed KEX*_REPLY",
+                "handshake",
                 DISCONNECT_REASON.KEY_EXCHANGE_FAILED
               );
             }
@@ -1113,24 +1147,24 @@ const createKeyExchange = (() => {
             if (hostPubKeyType === undefined) {
               return doFatalError(
                 this._protocol,
-                'Received malformed host public key',
-                'handshake',
+                "Received malformed host public key",
+                "handshake",
                 DISCONNECT_REASON.KEY_EXCHANGE_FAILED
               );
             }
             if (hostPubKeyType !== this.negotiated.serverHostKey) {
               // Check if we need to make an exception
               switch (this.negotiated.serverHostKey) {
-                case 'rsa-sha2-256':
-                case 'rsa-sha2-512':
-                  if (hostPubKeyType === 'ssh-rsa')
-                    break;
+                case "rsa-sha2-256":
+                // @ts-expect-error TS(7029): Fallthrough case in switch.
+                case "rsa-sha2-512":
+                  if (hostPubKeyType === "ssh-rsa") break;
                 // FALLTHROUGH
                 default:
                   return doFatalError(
                     this._protocol,
-                    'Host key does not match negotiated type',
-                    'handshake',
+                    "Host key does not match negotiated type",
+                    "handshake",
                     DISCONNECT_REASON.KEY_EXCHANGE_FAILED
                   );
               }
@@ -1144,33 +1178,29 @@ const createKeyExchange = (() => {
             let ret;
             if (this._protocol._hostVerifier === undefined) {
               ret = true;
-              this._protocol._debug && this._protocol._debug(
-                'Host accepted by default (no verification)'
-              );
+              this._protocol._debug &&
+                this._protocol._debug(
+                  "Host accepted by default (no verification)"
+                );
             } else {
               ret = this._protocol._hostVerifier(hostPubKey, (permitted) => {
-                if (checked)
-                  return;
+                if (checked) return;
                 checked = true;
                 if (permitted === false) {
-                  this._protocol._debug && this._protocol._debug(
-                    'Host denied (verification failed)'
-                  );
+                  this._protocol._debug &&
+                    this._protocol._debug("Host denied (verification failed)");
                   return doFatalError(
                     this._protocol,
-                    'Host denied (verification failed)',
-                    'handshake',
+                    "Host denied (verification failed)",
+                    "handshake",
                     DISCONNECT_REASON.KEY_EXCHANGE_FAILED
                   );
                 }
-                this._protocol._debug && this._protocol._debug(
-                  'Host accepted (verified)'
-                );
+                this._protocol._debug &&
+                  this._protocol._debug("Host accepted (verified)");
                 this._hostVerified = true;
-                if (this._receivedNEWKEYS)
-                  this.finish();
-                else
-                  trySendNEWKEYS(this);
+                if (this._receivedNEWKEYS) this.finish();
+                else trySendNEWKEYS(this);
               });
             }
             if (ret === undefined) {
@@ -1180,19 +1210,17 @@ const createKeyExchange = (() => {
             }
             checked = true;
             if (ret === false) {
-              this._protocol._debug && this._protocol._debug(
-                'Host denied (verification failed)'
-              );
+              this._protocol._debug &&
+                this._protocol._debug("Host denied (verification failed)");
               return doFatalError(
                 this._protocol,
-                'Host denied (verification failed)',
-                'handshake',
+                "Host denied (verification failed)",
+                "handshake",
                 DISCONNECT_REASON.KEY_EXCHANGE_FAILED
               );
             }
-            this._protocol._debug && this._protocol._debug(
-              'Host accepted (verified)'
-            );
+            this._protocol._debug &&
+              this._protocol._debug("Host accepted (verified)");
             this._hostVerified = true;
             trySendNEWKEYS(this);
           }
@@ -1203,13 +1231,11 @@ const createKeyExchange = (() => {
             return doFatalError(
               this._protocol,
               `Received packet ${type} instead of ${MESSAGE.NEWKEYS}`,
-              'handshake',
+              "handshake",
               DISCONNECT_REASON.KEY_EXCHANGE_FAILED
             );
           }
-          this._protocol._debug && this._protocol._debug(
-            'Inbound: NEWKEYS'
-          );
+          this._protocol._debug && this._protocol._debug("Inbound: NEWKEYS");
           this._receivedNEWKEYS = true;
           ++this._step;
           if (this._protocol._server || this._hostVerified)
@@ -1222,7 +1248,7 @@ const createKeyExchange = (() => {
           return doFatalError(
             this._protocol,
             `Received unexpected packet ${type} after NEWKEYS`,
-            'handshake',
+            "handshake",
             DISCONNECT_REASON.KEY_EXCHANGE_FAILED
           );
       }
@@ -1230,21 +1256,25 @@ const createKeyExchange = (() => {
   }
 
   class Curve25519Exchange extends KeyExchange {
+    _keys: any;
+    hashName: any;
+    type: any;
     constructor(hashName, ...args) {
+      // @ts-expect-error TS(2556): A spread argument must either have a tuple type or... Remove this comment to see the full error message
       super(...args);
 
-      this.type = '25519';
+      this.type = "25519";
       this.hashName = hashName;
       this._keys = null;
     }
+    // @ts-expect-error TS(2425): Class 'KeyExchange' defines instance member proper... Remove this comment to see the full error message
     generateKeys() {
-      if (!this._keys)
-        this._keys = generateKeyPairSync('x25519');
+      if (!this._keys) this._keys = generateKeyPairSync("x25519");
     }
     getPublicKey() {
       this.generateKeys();
 
-      const key = this._keys.publicKey.export({ type: 'spki', format: 'der' });
+      const key = this._keys.publicKey.export({ type: "spki", format: "der" });
       return key.slice(-32); // HACK: avoids parsing DER/BER header
     }
     convertPublicKey(key) {
@@ -1256,8 +1286,7 @@ const createKeyExchange = (() => {
         --len;
       }
 
-      if (key.length === 32)
-        return key;
+      if (key.length === 32) return key;
 
       if (len !== key.length) {
         newKey = Buffer.allocUnsafe(len);
@@ -1270,34 +1299,38 @@ const createKeyExchange = (() => {
       this.generateKeys();
 
       try {
-        const asnWriter = new Ber.Writer();
+        const asnWriter = new (Ber as any).Writer();
         asnWriter.startSequence();
-          // algorithm
-          asnWriter.startSequence();
-            asnWriter.writeOID('1.3.101.110'); // id-X25519
-          asnWriter.endSequence();
-
-          // PublicKey
-          asnWriter.startSequence(Ber.BitString);
-            asnWriter.writeByte(0x00);
-            // XXX: hack to write a raw buffer without a tag -- yuck
-            asnWriter._ensure(otherPublicKey.length);
-            otherPublicKey.copy(asnWriter._buf,
-                                asnWriter._offset,
-                                0,
-                                otherPublicKey.length);
-            asnWriter._offset += otherPublicKey.length;
-          asnWriter.endSequence();
+        // algorithm
+        asnWriter.startSequence();
+        asnWriter.writeOID("1.3.101.110"); // id-X25519
         asnWriter.endSequence();
 
-        return convertToMpint(diffieHellman({
-          privateKey: this._keys.privateKey,
-          publicKey: createPublicKey({
-            key: asnWriter.buffer,
-            type: 'spki',
-            format: 'der',
-          }),
-        }));
+        // PublicKey
+        asnWriter.startSequence(Ber.BitString);
+        asnWriter.writeByte(0x00);
+        // XXX: hack to write a raw buffer without a tag -- yuck
+        asnWriter._ensure(otherPublicKey.length);
+        otherPublicKey.copy(
+          asnWriter._buf,
+          asnWriter._offset,
+          0,
+          otherPublicKey.length
+        );
+        asnWriter._offset += otherPublicKey.length;
+        asnWriter.endSequence();
+        asnWriter.endSequence();
+
+        return convertToMpint(
+          diffieHellman({
+            privateKey: this._keys.privateKey,
+            publicKey: createPublicKey({
+              key: asnWriter.buffer,
+              type: "spki",
+              format: "der",
+            }),
+          })
+        );
       } catch (ex) {
         return ex;
       }
@@ -1305,13 +1338,20 @@ const createKeyExchange = (() => {
   }
 
   class ECDHExchange extends KeyExchange {
+    _dh: any;
+    _public: any;
+    curveName: any;
+    hashName: any;
+    type: any;
     constructor(curveName, hashName, ...args) {
+      // @ts-expect-error TS(2556): A spread argument must either have a tuple type or... Remove this comment to see the full error message
       super(...args);
 
-      this.type = 'ecdh';
+      this.type = "ecdh";
       this.curveName = curveName;
       this.hashName = hashName;
     }
+    // @ts-expect-error TS(2425): Class 'KeyExchange' defines instance member proper... Remove this comment to see the full error message
     generateKeys() {
       if (!this._dh) {
         this._dh = createECDH(this.curveName);
@@ -1321,10 +1361,23 @@ const createKeyExchange = (() => {
   }
 
   class DHGroupExchange extends KeyExchange {
+    _dh: any;
+    _generator: any;
+    _maxBits: any;
+    _minBits: any;
+    _prefBits: any;
+    _prime: any;
+    _protocol: any;
+    _public: any;
+    _step: any;
+    hashName: any;
+    negotiated: any;
+    type: any;
     constructor(hashName, ...args) {
+      // @ts-expect-error TS(2556): A spread argument must either have a tuple type or... Remove this comment to see the full error message
       super(...args);
 
-      this.type = 'groupex';
+      this.type = "groupex";
       this.hashName = hashName;
       this._prime = null;
       this._generator = null;
@@ -1335,24 +1388,20 @@ const createKeyExchange = (() => {
       this._maxBits = GEX_MAX_BITS;
     }
     start() {
-      if (this._protocol._server)
-        return;
-      this._protocol._debug && this._protocol._debug(
-        'Outbound: Sending KEXDH_GEX_REQUEST'
-      );
+      if (this._protocol._server) return;
+      this._protocol._debug &&
+        this._protocol._debug("Outbound: Sending KEXDH_GEX_REQUEST");
       let p = this._protocol._packetRW.write.allocStartKEX;
-      const packet = this._protocol._packetRW.write.alloc(
-        1 + 4 + 4 + 4,
-        true
-      );
+      const packet = this._protocol._packetRW.write.alloc(1 + 4 + 4 + 4, true);
       packet[p] = MESSAGE.KEXDH_GEX_REQUEST;
       writeUInt32BE(packet, this._minBits, ++p);
-      writeUInt32BE(packet, this._prefBits, p += 4);
-      writeUInt32BE(packet, this._maxBits, p += 4);
+      writeUInt32BE(packet, this._prefBits, (p += 4));
+      writeUInt32BE(packet, this._maxBits, (p += 4));
       this._protocol._cipher.encrypt(
         this._protocol._packetRW.write.finalize(packet, true)
       );
     }
+    // @ts-expect-error TS(2425): Class 'KeyExchange' defines instance member proper... Remove this comment to see the full error message
     generateKeys() {
       if (!this._dh && this._prime && this._generator) {
         this._dh = createDiffieHellman(this._prime, this._generator);
@@ -1360,13 +1409,13 @@ const createKeyExchange = (() => {
       }
     }
     setDHParams(prime, generator) {
-      if (!Buffer.isBuffer(prime))
-        throw new Error('Invalid prime value');
+      if (!Buffer.isBuffer(prime)) throw new Error("Invalid prime value");
       if (!Buffer.isBuffer(generator))
-        throw new Error('Invalid generator value');
+        throw new Error("Invalid generator value");
       this._prime = prime;
       this._generator = generator;
     }
+    // @ts-expect-error TS(2425): Class 'KeyExchange' defines instance member proper... Remove this comment to see the full error message
     getDHParams() {
       if (this._dh) {
         return {
@@ -1375,7 +1424,7 @@ const createKeyExchange = (() => {
         };
       }
     }
-    parse(payload) {
+    parse(payload): number | boolean | undefined {
       const type = payload[0];
       switch (this._step) {
         case 1:
@@ -1383,9 +1432,9 @@ const createKeyExchange = (() => {
             if (type !== MESSAGE.KEXDH_GEX_REQUEST) {
               return doFatalError(
                 this._protocol,
-                `Received packet ${type} instead of `
-                  + MESSAGE.KEXDH_GEX_REQUEST,
-                'handshake',
+                `Received packet ${type} instead of ` +
+                  MESSAGE.KEXDH_GEX_REQUEST,
+                "handshake",
                 DISCONNECT_REASON.KEY_EXCHANGE_FAILED
               );
             }
@@ -1393,8 +1442,8 @@ const createKeyExchange = (() => {
             // generator on demand to support group exchange on server side
             return doFatalError(
               this._protocol,
-              'Group exchange not implemented for server',
-              'handshake',
+              "Group exchange not implemented for server",
+              "handshake",
               DISCONNECT_REASON.KEY_EXCHANGE_FAILED
             );
           }
@@ -1403,14 +1452,13 @@ const createKeyExchange = (() => {
             return doFatalError(
               this._protocol,
               `Received packet ${type} instead of ${MESSAGE.KEXDH_GEX_GROUP}`,
-              'handshake',
+              "handshake",
               DISCONNECT_REASON.KEY_EXCHANGE_FAILED
             );
           }
 
-          this._protocol._debug && this._protocol._debug(
-            'Received DH GEX Group'
-          );
+          this._protocol._debug &&
+            this._protocol._debug("Received DH GEX Group");
 
           /*
             byte    SSH_MSG_KEX_DH_GEX_GROUP
@@ -1420,13 +1468,15 @@ const createKeyExchange = (() => {
           bufferParser.init(payload, 1);
           let prime;
           let gen;
-          if ((prime = bufferParser.readString()) === undefined
-              || (gen = bufferParser.readString()) === undefined) {
+          if (
+            (prime = bufferParser.readString()) === undefined ||
+            (gen = bufferParser.readString()) === undefined
+          ) {
             bufferParser.clear();
             return doFatalError(
               this._protocol,
-              'Received malformed KEXDH_GEX_GROUP',
-              'handshake',
+              "Received malformed KEXDH_GEX_GROUP",
+              "handshake",
               DISCONNECT_REASON.KEY_EXCHANGE_FAILED
             );
           }
@@ -1437,16 +1487,17 @@ const createKeyExchange = (() => {
           this.generateKeys();
           const pubkey = this.getPublicKey();
 
-          this._protocol._debug && this._protocol._debug(
-            'Outbound: Sending KEXDH_GEX_INIT'
-          );
+          this._protocol._debug &&
+            this._protocol._debug("Outbound: Sending KEXDH_GEX_INIT");
 
           let p = this._protocol._packetRW.write.allocStartKEX;
-          const packet =
-            this._protocol._packetRW.write.alloc(1 + 4 + pubkey.length, true);
+          const packet = this._protocol._packetRW.write.alloc(
+            1 + 4 + pubkey.length,
+            true
+          );
           packet[p] = MESSAGE.KEXDH_GEX_INIT;
           writeUInt32BE(packet, pubkey.length, ++p);
-          packet.set(pubkey, p += 4);
+          packet.set(pubkey, (p += 4));
           this._protocol._cipher.encrypt(
             this._protocol._packetRW.write.finalize(packet, true)
           );
@@ -1459,30 +1510,28 @@ const createKeyExchange = (() => {
               return doFatalError(
                 this._protocol,
                 `Received packet ${type} instead of ${MESSAGE.KEXDH_GEX_INIT}`,
-                'handshake',
+                "handshake",
                 DISCONNECT_REASON.KEY_EXCHANGE_FAILED
               );
             }
-            this._protocol._debug && this._protocol._debug(
-              'Received DH GEX Init'
-            );
+            this._protocol._debug &&
+              this._protocol._debug("Received DH GEX Init");
             return doFatalError(
               this._protocol,
-              'Group exchange not implemented for server',
-              'handshake',
+              "Group exchange not implemented for server",
+              "handshake",
               DISCONNECT_REASON.KEY_EXCHANGE_FAILED
             );
           } else if (type !== MESSAGE.KEXDH_GEX_REPLY) {
             return doFatalError(
               this._protocol,
               `Received packet ${type} instead of ${MESSAGE.KEXDH_GEX_REPLY}`,
-              'handshake',
+              "handshake",
               DISCONNECT_REASON.KEY_EXCHANGE_FAILED
             );
           }
-          this._protocol._debug && this._protocol._debug(
-            'Received DH GEX Reply'
-          );
+          this._protocol._debug &&
+            this._protocol._debug("Received DH GEX Reply");
           this._step = 1;
           payload[0] = MESSAGE.KEXDH_REPLY;
           this.parse = KeyExchange.prototype.parse;
@@ -1492,36 +1541,46 @@ const createKeyExchange = (() => {
   }
 
   class DHExchange extends KeyExchange {
+    _dh: any;
+    _protocol: any;
+    _public: any;
+    groupName: any;
+    hashName: any;
+    type: any;
     constructor(groupName, hashName, ...args) {
+      // @ts-expect-error TS(2556): A spread argument must either have a tuple type or... Remove this comment to see the full error message
       super(...args);
 
-      this.type = 'group';
+      this.type = "group";
       this.groupName = groupName;
       this.hashName = hashName;
     }
     start() {
       if (!this._protocol._server) {
-        this._protocol._debug && this._protocol._debug(
-          'Outbound: Sending KEXDH_INIT'
-        );
+        this._protocol._debug &&
+          this._protocol._debug("Outbound: Sending KEXDH_INIT");
         const pubKey = this.getPublicKey();
         let p = this._protocol._packetRW.write.allocStartKEX;
-        const packet =
-          this._protocol._packetRW.write.alloc(1 + 4 + pubKey.length, true);
+        const packet = this._protocol._packetRW.write.alloc(
+          1 + 4 + pubKey.length,
+          true
+        );
         packet[p] = MESSAGE.KEXDH_INIT;
         writeUInt32BE(packet, pubKey.length, ++p);
-        packet.set(pubKey, p += 4);
+        packet.set(pubKey, (p += 4));
         this._protocol._cipher.encrypt(
           this._protocol._packetRW.write.finalize(packet, true)
         );
       }
     }
+    // @ts-expect-error TS(2425): Class 'KeyExchange' defines instance member proper... Remove this comment to see the full error message
     generateKeys() {
       if (!this._dh) {
         this._dh = createDiffieHellmanGroup(this.groupName);
         this._public = this._dh.generateKeys();
       }
     }
+    // @ts-expect-error TS(2425): Class 'KeyExchange' defines instance member proper... Remove this comment to see the full error message
     getDHParams() {
       if (this._dh) {
         return {
@@ -1533,44 +1592,43 @@ const createKeyExchange = (() => {
   }
 
   return (negotiated, ...args) => {
-    if (typeof negotiated !== 'object' || negotiated === null)
-      throw new Error('Invalid negotiated argument');
+    if (typeof negotiated !== "object" || negotiated === null)
+      throw new Error("Invalid negotiated argument");
     const kexType = negotiated.kex;
-    if (typeof kexType === 'string') {
+    if (typeof kexType === "string") {
       args = [negotiated, ...args];
       switch (kexType) {
-        case 'curve25519-sha256':
-        case 'curve25519-sha256@libssh.org':
-          if (!curve25519Supported)
-            break;
-          return new Curve25519Exchange('sha256', ...args);
+        case "curve25519-sha256":
+        case "curve25519-sha256@libssh.org":
+          if (!curve25519Supported) break;
+          return new Curve25519Exchange("sha256", ...args);
 
-        case 'ecdh-sha2-nistp256':
-          return new ECDHExchange('prime256v1', 'sha256', ...args);
-        case 'ecdh-sha2-nistp384':
-          return new ECDHExchange('secp384r1', 'sha384', ...args);
-        case 'ecdh-sha2-nistp521':
-          return new ECDHExchange('secp521r1', 'sha512', ...args);
+        case "ecdh-sha2-nistp256":
+          return new ECDHExchange("prime256v1", "sha256", ...args);
+        case "ecdh-sha2-nistp384":
+          return new ECDHExchange("secp384r1", "sha384", ...args);
+        case "ecdh-sha2-nistp521":
+          return new ECDHExchange("secp521r1", "sha512", ...args);
 
-        case 'diffie-hellman-group1-sha1':
-          return new DHExchange('modp2', 'sha1', ...args);
-        case 'diffie-hellman-group14-sha1':
-          return new DHExchange('modp14', 'sha1', ...args);
-        case 'diffie-hellman-group14-sha256':
-          return new DHExchange('modp14', 'sha256', ...args);
-        case 'diffie-hellman-group15-sha512':
-          return new DHExchange('modp15', 'sha512', ...args);
-        case 'diffie-hellman-group16-sha512':
-          return new DHExchange('modp16', 'sha512', ...args);
-        case 'diffie-hellman-group17-sha512':
-          return new DHExchange('modp17', 'sha512', ...args);
-        case 'diffie-hellman-group18-sha512':
-          return new DHExchange('modp18', 'sha512', ...args);
+        case "diffie-hellman-group1-sha1":
+          return new DHExchange("modp2", "sha1", ...args);
+        case "diffie-hellman-group14-sha1":
+          return new DHExchange("modp14", "sha1", ...args);
+        case "diffie-hellman-group14-sha256":
+          return new DHExchange("modp14", "sha256", ...args);
+        case "diffie-hellman-group15-sha512":
+          return new DHExchange("modp15", "sha512", ...args);
+        case "diffie-hellman-group16-sha512":
+          return new DHExchange("modp16", "sha512", ...args);
+        case "diffie-hellman-group17-sha512":
+          return new DHExchange("modp17", "sha512", ...args);
+        case "diffie-hellman-group18-sha512":
+          return new DHExchange("modp18", "sha512", ...args);
 
-        case 'diffie-hellman-group-exchange-sha1':
-          return new DHGroupExchange('sha1', ...args);
-        case 'diffie-hellman-group-exchange-sha256':
-          return new DHGroupExchange('sha256', ...args);
+        case "diffie-hellman-group-exchange-sha1":
+          return new DHGroupExchange("sha1", ...args);
+        case "diffie-hellman-group-exchange-sha256":
+          return new DHGroupExchange("sha256", ...args);
       }
       throw new Error(`Unsupported key exchange algorithm: ${kexType}`);
     }
@@ -1578,23 +1636,25 @@ const createKeyExchange = (() => {
   };
 })();
 
-const KexInit = (() => {
+export const KexInit = (() => {
   const KEX_PROPERTY_NAMES = [
-    'kex',
-    'serverHostKey',
-    ['cs', 'cipher' ],
-    ['sc', 'cipher' ],
-    ['cs', 'mac' ],
-    ['sc', 'mac' ],
-    ['cs', 'compress' ],
-    ['sc', 'compress' ],
-    ['cs', 'lang' ],
-    ['sc', 'lang' ],
+    "kex",
+    "serverHostKey",
+    ["cs", "cipher"],
+    ["sc", "cipher"],
+    ["cs", "mac"],
+    ["sc", "mac"],
+    ["cs", "compress"],
+    ["sc", "compress"],
+    ["cs", "lang"],
+    ["sc", "lang"],
   ];
   return class KexInit {
+    lists: any;
+    totalSize: any;
     constructor(obj) {
-      if (typeof obj !== 'object' || obj === null)
-        throw new TypeError('Argument must be an object');
+      if (typeof obj !== "object" || obj === null)
+        throw new TypeError("Argument must be an object");
 
       const lists = {
         kex: undefined,
@@ -1620,7 +1680,7 @@ const KexInit = (() => {
         let val;
         let desc;
         let key;
-        if (typeof prop === 'string') {
+        if (typeof prop === "string") {
           base = lists;
           val = obj[prop];
           desc = key = prop;
@@ -1633,33 +1693,36 @@ const KexInit = (() => {
         }
         const entry = { array: undefined, buffer: undefined };
         if (Buffer.isBuffer(val)) {
-          entry.array = ('' + val).split(',');
+          // @ts-expect-error TS(2322): Type 'string[]' is not assignable to type 'undefin... Remove this comment to see the full error message
+          entry.array = `${val}`.split(",");
+          // @ts-expect-error TS(2322): Type 'Buffer' is not assignable to type 'undefined... Remove this comment to see the full error message
           entry.buffer = val;
           totalSize += 4 + val.length;
         } else {
-          if (typeof val === 'string')
-            val = val.split(',');
+          if (typeof val === "string") val = val.split(",");
           if (Array.isArray(val)) {
+            // @ts-expect-error TS(2322): Type 'any[]' is not assignable to type 'undefined'... Remove this comment to see the full error message
             entry.array = val;
-            entry.buffer = Buffer.from(val.join(','));
+            // @ts-expect-error TS(2322): Type 'Buffer' is not assignable to type 'undefined... Remove this comment to see the full error message
+            entry.buffer = Buffer.from(val.join(","));
           } else {
             throw new TypeError(`Invalid \`${desc}\` type: ${typeof val}`);
           }
+          // @ts-expect-error TS(2532): Object is possibly 'undefined'.
           totalSize += 4 + entry.buffer.length;
         }
         base[key] = entry;
       }
 
       const all = Buffer.allocUnsafe(totalSize);
+      // @ts-expect-error TS(2322): Type 'Buffer' is not assignable to type 'undefined... Remove this comment to see the full error message
       lists.all = all;
 
       let allPos = 0;
       for (const prop of KEX_PROPERTY_NAMES) {
         let data;
-        if (typeof prop === 'string')
-          data = lists[prop].buffer;
-        else
-          data = lists[prop[0]][prop[1]].buffer;
+        if (typeof prop === "string") data = lists[prop].buffer;
+        else data = lists[prop[0]][prop[1]].buffer;
         allPos = writeUInt32BE(all, data.length, allPos);
         all.set(data, allPos);
         allPos += data.length;
@@ -1670,17 +1733,17 @@ const KexInit = (() => {
     }
     copyAllTo(buf, offset) {
       const src = this.lists.all;
-      if (typeof offset !== 'number')
+      if (typeof offset !== "number")
         throw new TypeError(`Invalid offset value: ${typeof offset}`);
       if (buf.length - offset < src.length)
-        throw new Error('Insufficient space to copy list');
+        throw new Error("Insufficient space to copy list");
       buf.set(src, offset);
       return src.length;
     }
   };
 })();
 
-const hashString = (() => {
+export const hashString = (() => {
   const LEN = Buffer.allocUnsafe(4);
   return (hash, buf) => {
     writeUInt32BE(LEN, buf.length, 0);
@@ -1689,40 +1752,45 @@ const hashString = (() => {
   };
 })();
 
-function generateKEXVal(len, hashName, secret, exchangeHash, sessionID, char) {
+export function generateKEXVal(
+  len,
+  hashName,
+  secret,
+  exchangeHash,
+  sessionID,
+  char
+) {
   let ret;
   if (len) {
     let digest = createHash(hashName)
-                   .update(secret)
-                   .update(exchangeHash)
-                   .update(char)
-                   .update(sessionID)
-                   .digest();
+      .update(secret)
+      .update(exchangeHash)
+      .update(char)
+      .update(sessionID)
+      .digest();
     while (digest.length < len) {
       const chunk = createHash(hashName)
-                      .update(secret)
-                      .update(exchangeHash)
-                      .update(digest)
-                      .digest();
+        .update(secret)
+        .update(exchangeHash)
+        .update(digest)
+        .digest();
       const extended = Buffer.allocUnsafe(digest.length + chunk.length);
       extended.set(digest, 0);
       extended.set(chunk, digest.length);
       digest = extended;
     }
-    if (digest.length === len)
-      ret = digest;
-    else
-      ret = new FastBuffer(digest.buffer, digest.byteOffset, len);
+    if (digest.length === len) ret = digest;
+    else ret = new FastBuffer(digest.buffer, digest.byteOffset, len);
   } else {
     ret = EMPTY_BUFFER;
   }
   return ret;
 }
 
-function onKEXPayload(state, payload) {
+export function onKEXPayload(this: any, state, payload) {
   // XXX: move this to the Decipher implementations?
   if (payload.length === 0) {
-    this._debug && this._debug('Inbound: Skipping empty packet payload');
+    this._debug && this._debug("Inbound: Skipping empty packet payload");
     return;
   }
 
@@ -1739,15 +1807,13 @@ function onKEXPayload(state, payload) {
     case MESSAGE.IGNORE:
     case MESSAGE.UNIMPLEMENTED:
     case MESSAGE.DEBUG:
-      if (!MESSAGE_HANDLERS)
-        MESSAGE_HANDLERS = require('./handlers.js');
       return MESSAGE_HANDLERS[type](this, payload);
     case MESSAGE.KEXINIT:
       if (!state.firstPacket) {
         return doFatalError(
           this,
-          'Received extra KEXINIT during handshake',
-          'handshake',
+          "Received extra KEXINIT during handshake",
+          "handshake",
           DISCONNECT_REASON.KEY_EXCHANGE_FAILED
         );
       }
@@ -1758,7 +1824,7 @@ function onKEXPayload(state, payload) {
         return doFatalError(
           this,
           `Received unexpected packet type ${type}`,
-          'handshake',
+          "handshake",
           DISCONNECT_REASON.KEY_EXCHANGE_FAILED
         );
       }
@@ -1767,34 +1833,30 @@ function onKEXPayload(state, payload) {
   return this._kex.parse(payload);
 }
 
-function dhEstimate(neg) {
-  const csCipher = CIPHER_INFO[neg.cs.cipher];
-  const scCipher = CIPHER_INFO[neg.sc.cipher];
+export function dhEstimate({ cs, sc }) {
+  const csCipher = CIPHER_INFO[cs.cipher];
+  const scCipher = CIPHER_INFO[sc.cipher];
   // XXX: if OpenSSH's `umac-*` MACs are ever supported, their key lengths will
   // also need to be considered when calculating `bits`
-  const bits = Math.max(
-    0,
-    (csCipher.sslName === 'des-ede3-cbc' ? 14 : csCipher.keyLen),
-    csCipher.blockLen,
-    csCipher.ivLen,
-    (scCipher.sslName === 'des-ede3-cbc' ? 14 : scCipher.keyLen),
-    scCipher.blockLen,
-    scCipher.ivLen
-  ) * 8;
-  if (bits <= 112)
-    return 2048;
-  if (bits <= 128)
-    return 3072;
-  if (bits <= 192)
-    return 7680;
+  const bits =
+    Math.max(
+      0,
+      csCipher.sslName === "des-ede3-cbc" ? 14 : csCipher.keyLen,
+      csCipher.blockLen,
+      csCipher.ivLen,
+      scCipher.sslName === "des-ede3-cbc" ? 14 : scCipher.keyLen,
+      scCipher.blockLen,
+      scCipher.ivLen
+    ) * 8;
+  if (bits <= 112) return 2048;
+  if (bits <= 128) return 3072;
+  if (bits <= 192) return 7680;
   return 8192;
 }
 
-function trySendNEWKEYS(kex) {
+export function trySendNEWKEYS(kex) {
   if (!kex._sentNEWKEYS) {
-    kex._protocol._debug && kex._protocol._debug(
-      'Outbound: Sending NEWKEYS'
-    );
+    kex._protocol._debug && kex._protocol._debug("Outbound: Sending NEWKEYS");
     const p = kex._protocol._packetRW.write.allocStartKEX;
     const packet = kex._protocol._packetRW.write.alloc(1, true);
     packet[p] = MESSAGE.NEWKEYS;
@@ -1805,27 +1867,29 @@ function trySendNEWKEYS(kex) {
   }
 }
 
-module.exports = {
+export const HANDLERS = {
+  [MESSAGE.KEXINIT]: handleKexInit,
+} as const;
+export const DEFAULT_KEXINIT = new KexInit({
+  kex: DEFAULT_KEX,
+  serverHostKey: DEFAULT_SERVER_HOST_KEY,
+  cs: {
+    cipher: DEFAULT_CIPHER,
+    mac: DEFAULT_MAC,
+    compress: DEFAULT_COMPRESSION,
+    lang: [],
+  },
+  sc: {
+    cipher: DEFAULT_CIPHER,
+    mac: DEFAULT_MAC,
+    compress: DEFAULT_COMPRESSION,
+    lang: [],
+  },
+});
+export default {
   KexInit,
   kexinit,
   onKEXPayload,
-  DEFAULT_KEXINIT: new KexInit({
-    kex: DEFAULT_KEX,
-    serverHostKey: DEFAULT_SERVER_HOST_KEY,
-    cs: {
-      cipher: DEFAULT_CIPHER,
-      mac: DEFAULT_MAC,
-      compress: DEFAULT_COMPRESSION,
-      lang: [],
-    },
-    sc: {
-      cipher: DEFAULT_CIPHER,
-      mac: DEFAULT_MAC,
-      compress: DEFAULT_COMPRESSION,
-      lang: [],
-    },
-  }),
-  HANDLERS: {
-    [MESSAGE.KEXINIT]: handleKexInit,
-  },
+  DEFAULT_KEXINIT: DEFAULT_KEXINIT,
+  HANDLERS: HANDLERS,
 };
